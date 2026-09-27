@@ -2,17 +2,17 @@
 
 Brightness Floor — a Decky plugin for Steam Deck OLED that remembers a user-calibrated minimum brightness and clamps its own brightness controls.
 
-为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。首版 0.1.3 使用手动调节；系统自适应下限尚未开放。真机 SDR、HDR 和刷新率兼容性待验证。
+为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。当前版本 0.1.4 使用手动调节，自动读取系统自适应状态；系统自适应下限尚未开放。
 
 [下载预发布安装包](https://github.com/wx40217/decky-brightness/releases) · [反馈问题](https://github.com/wx40217/decky-brightness/issues)
 
 ## 安装与使用
 
-1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.3.zip` 复制到 Deck，无需解压。
+1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.4.zip` 复制到 Deck，无需解压。
 2. 在游戏模式打开 Decky 设置，启用开发者模式，使用“从 ZIP 安装插件 / Install Plugin from ZIP”选择安装包。
 3. 关闭 Steam 系统自适应亮度并打开“亮度下限”。插件直接读取系统开关，显示“系统自适应：关闭”后即可调光，无须额外勾选确认。
 4. 没有自定义配置时，默认下限为 44%，来自作者在自己的 Steam Deck OLED 上的校准。滑块和 ±0.01、±0.1 个百分点微调按钮均在当前下限至 100% 范围内调节。“回到最低亮度”可回到该下限。
-5. 可点击“将当前亮度保存为下限”保存自定义值；需要重新校准到现有下限以下时，先用系统调节到你确认可接受的位置，再保存。若还未取得当前值，先在系统中略微调亮，再回到所需位置。
+5. 可点击“将当前亮度设为下限”保存自定义值；需要重新校准到现有下限以下时，先用系统调节到你确认可接受的位置，再保存。若还未取得当前值，先在系统中略微调亮，再回到所需位置。
 
 自定义下限以原始数值保存在 Decky 的插件设置目录中；关闭面板、重启和正常更新不会清除它，更新也不会将已有自定义值改成 44%。旧版未设置下限的配置自动使用默认 44%，无需重写文件。插件不会在启动时自动改变亮度；需要时点击“回到最低亮度”。
 
@@ -23,6 +23,10 @@ Brightness Floor — a Decky plugin for Steam Deck OLED that remembers a user-ca
 滑块步长为 0.01 个百分点，微调按钮从当前值或尚在处理的目标值累加，不会按显示百分比取整。实际可区分的亮度级数取决于 SteamOS 和屏幕。
 
 界面显示的是 Steam 亮度控制值，不是实测屏幕亮度或频闪检测。设置后必须收到符合目标值的系统回报才显示确认，保存下限后还要求回报不低于下限；没有回报、接口失败或回报无效时会提示错误。系统回报也不等于物理屏幕测量。
+
+面板使用系统已有的简体中文 Noto 字体，统一中文与数字字形，并增大微调按钮和状态文字；日常界面只显示亮度、下限、自适应状态和操作。异常提示按当前状态显示，开发兼容性说明留在仓库文档中。
+
+已在 Steam Deck OLED、SteamOS 3.8.28、Decky 3.2.9 的游戏模式菜单验证：90 Hz 下切换 SDR 输出与 HDR 输出时，插件调亮、返回精确下限均成功，系统实际背光读数随调节变化。HDR 输出模式下测试的内容仍是 SDR 菜单，不能据此宣称 HDR 游戏内容或物理频闪已验证。45/60 Hz 请求在菜单中未实际生效，合成器仍回报 90 Hz，需进入游戏后另行验证。
 
 ## 开发
 
@@ -44,7 +48,7 @@ ZIP 包含一个 `decky-brightness-floor/` 顶层目录及编译后的 `dist/ind
 
 亮度接口参考 [Decky Display 类型定义](https://github.com/SteamDeckHomebrew/decky-frontend-lib/blob/main/src/globals/steam-client/system/Display.ts)。系统自适应状态读取 `CMsgSystemManagerSettings` 的 `display_adaptive_brightness_enabled` 字段（7）；未携带该字段的增量通知不会被误判为关闭。控制器随插件加载，独立于面板挂载，对快速连续请求合并待发送值，所有发送值均经过当前下限限制。没有对 Steam 全局接口做拦截。
 
-后续验证重点：系统版本与接口回报、调亮后返回精确下限、关闭面板与重新打开、睡眠唤醒与重启、进出 SDR/HDR 游戏及 45/60/90 Hz、外接屏幕暂停。系统自适应需额外证明在实际生效前受限且不会争抢，才能开放。
+后续验证重点：睡眠唤醒与重启、实际 SDR/HDR 游戏内容及 45/60 Hz、外接屏幕暂停。系统自适应需额外证明在实际生效前受限且不会争抢，才能开放。
 
 ## 发布方式
 

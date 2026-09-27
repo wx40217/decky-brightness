@@ -120,7 +120,7 @@ await wait();
 assert.equal(writes.at(-1), 0.6999);
 assert.equal(content.find(node => node.type === "ButtonItem" && node.props.children === "回到最低亮度").props.disabled, false);
 content = panel(calibration);
-content.find(node => node.type === "ButtonItem" && node.props.children === "将当前亮度保存为下限").props.onClick();
+content.find(node => node.type === "ButtonItem" && node.props.children === "将当前亮度设为下限").props.onClick();
 await wait();
 content = panel(calibration);
 assert.equal(content.find(node => node.type === "SliderField").props.min, 69.99);

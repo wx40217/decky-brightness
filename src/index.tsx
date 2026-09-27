@@ -7,6 +7,14 @@ import type { BackendState, DisplayAPI, SettingsState, SystemSettingsAPI } from 
 
 const getState = callable<[], BackendState>("get_state");
 const saveMinimum = callable<[value: number], SettingsState>("save_minimum");
+const fontFamily = '"Noto Sans CJK SC", "Noto Sans SC", "Noto Sans CJK JP", sans-serif';
+const panelStyles = `
+[data-brightness-floor], [data-brightness-floor] * {
+  font-family: ${fontFamily} !important;
+  font-stretch: normal !important;
+  font-feature-settings: normal !important;
+}
+`;
 
 function percentage(value: number | null): string {
   return value === null ? "尚未取得" : `${(value * 100).toFixed(2)}%`;
@@ -20,52 +28,28 @@ function Content({ controller }: { controller: BrightnessController }) {
   const minimum = state.minimum ?? 0;
   const value = state.requested ?? state.current ?? state.minimum ?? 0;
   const reason = state.backend?.environment.reason;
-  const unavailable = !state.connected ? state.error : reason || (!state.backend ? state.error : null);
+  const status = state.error || reason || state.backend?.settings_error || state.adaptiveError ||
+    (state.adaptiveEnabled === true ? "请关闭系统自适应后调光。" :
+      state.adaptiveEnabled === null ? "正在读取系统自适应状态…" :
+      state.current === null ? "尚未取得亮度，请在系统中略微调亮。" :
+      state.busy ? "正在调节…" :
+      state.minimum !== null && state.current < state.minimum ? "当前亮度低于下限，可点击“回到最低亮度”。" : null);
+  const needsRefresh = !!state.error || !!state.adaptiveError || !state.backend || state.current === null;
 
-  return <>
-    <PanelSection title="最低可接受亮度">
+  return <div data-brightness-floor lang="zh-CN">
+    <style>{panelStyles}</style>
+    <PanelSection>
       <PanelSectionRow>
-        <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-          当前亮度：{percentage(state.current)}<br />
-          亮度下限：{state.minimum === null ? "尚未取得" : percentage(state.minimum)}
-          {state.backend?.minimum_is_default && "（默认）"}
-          {unavailable && <div role="status" style={{ color: "#ffb86b" }}>{unavailable}</div>}
-        </div>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-          {state.backend?.minimum_is_default
-            ? "默认下限为 44%，可直接调光，也可将你确认可接受的当前亮度保存为自定义下限。"
-            : state.minimum === null
-            ? "先关闭系统自适应，用下方滑块和微调按钮找到你可接受的最低位置，然后保存。尚未保存时可在 0–100% 范围内校准。"
-            : "调整下限时，请先用系统调节到确认可接受的位置，再重新保存。"}
-          {state.current === null && " 尚未收到亮度回报时，请先在系统中略微调亮，再调到需要的位置。"}
-        </div>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ButtonItem layout="below" disabled={!canAdjust || state.busy}
-          onClick={() => void controller.saveCurrentMinimum()}>
-          将当前亮度保存为下限
-        </ButtonItem>
-      </PanelSectionRow>
-    </PanelSection>
-    <PanelSection title="插件内调光">
-      <PanelSectionRow>
-        <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-          本版本仅限制插件内的调节。插件自动读取系统自适应状态，关闭后即可调光。
-          系统滑块和亮度快捷键仍可能低于下限。
-        </div>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <div role="status" style={{ fontSize: 13, lineHeight: 1.6 }}>
-          系统自适应：{state.adaptiveEnabled === null ? "尚未确认" : state.adaptiveEnabled ? "开启" : "关闭"}<br />
-          {state.adaptiveError || (state.adaptiveEnabled === true
-            ? "请在 Steam 系统设置中关闭自适应，插件调光会自动恢复。"
-            : state.adaptiveEnabled === null ? "等待系统回报，插件调光暂不可用。" : "已读取系统状态，可通过插件调光。")}
+        <div style={{ lineHeight: 1.6 }}>
+          <div style={{ fontSize: 20, fontWeight: 500 }}>当前亮度 {percentage(state.current)}</div>
+          <div style={{ fontSize: 14, color: "#b8bcbf" }}>
+            下限 {percentage(state.minimum)}{state.backend?.minimum_is_default && " · 默认"}
+            <br />自适应：{state.adaptiveEnabled === null ? "读取中" : state.adaptiveEnabled ? "开启" : "关闭"}
+          </div>
         </div>
       </PanelSectionRow>
       {minimum < 1 && <PanelSectionRow>
-        <SliderField label={state.minimum === null ? "校准亮度" : "调节亮度"}
+        <SliderField label="亮度"
           min={minimum * 100} max={100} step={0.01} minimumDpadGranularity={0.01}
           notchTicksVisible={false}
           value={Math.max(minimum * 100, Math.min(100, value * 100))}
@@ -73,11 +57,10 @@ function Content({ controller }: { controller: BrightnessController }) {
           onChange={value => controller.setBrightness(value / 100)} />
       </PanelSectionRow>}
       <PanelSectionRow>
-        <div style={{ fontSize: 12, marginBottom: 8 }}>微调：每次 0.01 或 0.1 个百分点</div>
         <Focusable style={{ display: "flex", gap: 4 }} flow-children="row">
           {[-0.001, -0.0001, 0.0001, 0.001].map(delta =>
             <DialogButton key={delta}
-              style={{ minWidth: 0, padding: "8px 2px", flex: 1, fontSize: 12 }}
+              style={{ minWidth: 0, padding: "8px 2px", flex: 1, fontSize: 14, whiteSpace: "nowrap" }}
               disabled={!canAdjust ||
                 (delta < 0 ? value <= minimum : value >= 1)}
               onClick={() => controller.adjustBrightness(delta)}>
@@ -86,7 +69,7 @@ function Content({ controller }: { controller: BrightnessController }) {
         </Focusable>
       </PanelSectionRow>
       {state.minimum === 1 && <PanelSectionRow>
-        <div style={{ fontSize: 12 }}>下限已设为最大亮度，没有可调范围。</div>
+        <div style={{ fontSize: 14 }}>下限已设为最大亮度。</div>
       </PanelSectionRow>}
       <PanelSectionRow>
         <ButtonItem layout="below" disabled={!canAdjust || state.minimum === null || state.busy}
@@ -95,30 +78,26 @@ function Content({ controller }: { controller: BrightnessController }) {
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
-        <div role="status" style={{ fontSize: 12, lineHeight: 1.6 }}>
-          {state.error || reason || state.backend?.settings_error ||
-            (state.busy ? "正在处理，等待系统确认…" : state.message) || "仅管理游戏模式内置屏幕。"}
-          {state.current !== null && state.minimum !== null && state.current < state.minimum &&
-            <div style={{ color: "#ffb86b" }}>当前亮度低于已保存下限，请关闭自适应并点击“回到最低亮度”。</div>}
-        </div>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ButtonItem layout="below" disabled={state.busy} onClick={() => void controller.refresh()}>
-          重新检查设备状态
+        <ButtonItem layout="below" disabled={!canAdjust || state.busy}
+          onClick={() => void controller.saveCurrentMinimum()}>
+          将当前亮度设为下限
         </ButtonItem>
       </PanelSectionRow>
-    </PanelSection>
-    <PanelSection title="兼容性">
+      {status && <PanelSectionRow>
+        <div role="status" style={{ fontSize: 14, lineHeight: 1.5, color: "#ffb86b" }}>{status}</div>
+      </PanelSectionRow>}
+      {needsRefresh && <PanelSectionRow>
+        <ButtonItem layout="below" disabled={state.busy} onClick={() => void controller.refresh()}>
+          重新读取状态
+        </ButtonItem>
+      </PanelSectionRow>}
       <PanelSectionRow>
-        <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-          系统自适应下限：未验证，未开放。<br />
-          SDR / HDR / 刷新率：待真机验证。<br />
-          {state.backend && <>设备：{state.backend.environment.model}；SteamOS：{state.backend.environment.steamos_version}<br /></>}
-          保存的百分比是系统控制值，界面显示精度不影响实际保存值。
+        <div style={{ fontSize: 14, lineHeight: 1.5, color: "#b8bcbf" }}>
+          下限仅作用于插件内调光。
         </div>
       </PanelSectionRow>
     </PanelSection>
-  </>;
+  </div>;
 }
 
 export default definePlugin(() => {
@@ -127,7 +106,7 @@ export default definePlugin(() => {
   void controller.start();
   return {
     name: "亮度下限",
-    titleView: <div className={staticClasses.Title}>亮度下限</div>,
+    titleView: <div className={staticClasses.Title} lang="zh-CN" style={{ fontFamily }}>亮度下限</div>,
     content: <Content controller={controller} />,
     icon: <FaSun />,
     onDismount() { controller.dispose(); },
