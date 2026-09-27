@@ -1,6 +1,6 @@
 {
   "name": "decky-brightness-floor",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Steam Deck OLED brightness floor with precise calibration",
   "type": "module",
   "license": "BSD-3-Clause",

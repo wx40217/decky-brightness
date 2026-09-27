@@ -1,5 +1,8 @@
 import type { BackendAPI, BackendState, DisplayAPI } from "./types";
 
+// Smaller than a 0.01 percentage point adjustment; allows native float rounding.
+const confirmationTolerance = 0.00002;
+
 export function brightness(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
     throw new Error("亮度值无效，应在 0 到 1 之间。");
@@ -31,7 +34,7 @@ export class BrightnessController {
   private subscribers = new Set<() => void>();
   private registration: { unregister(): void } | null = null;
   private poll: ReturnType<typeof setInterval> | null = null;
-  private confirmation: { target: number; resolve: () => void; reject: (e: Error) => void } | null = null;
+  private confirmation: { target: number; minimum: number; resolve: () => void; reject: (e: Error) => void } | null = null;
   private confirmationTimer: ReturnType<typeof setTimeout> | null = null;
   private queued: number | null = null;
   private disposed = false;
@@ -105,8 +108,8 @@ export class BrightnessController {
     }
     this.update({ current });
     const pending = this.confirmation;
-    if (pending && this.state.minimum !== null && current >= this.state.minimum &&
-        Math.abs(current - pending.target) <= 0.005) {
+    if (pending && current >= pending.minimum &&
+        Math.abs(current - pending.target) <= confirmationTolerance) {
       pending.resolve();
     }
     // Deliberately never correct events after the fact: adaptive support is unverified.
@@ -180,12 +183,26 @@ export class BrightnessController {
       if (this.state.busy && !this.running) throw new Error("正在保存下限，请稍候。");
       if (!this.state.connected || !this.state.backend?.environment.allowed) throw new Error("当前无法控制内置屏幕亮度。");
       if (!this.state.manualConfirmed) throw new Error("请先关闭系统自适应并确认。" );
-      if (this.state.minimum === null) throw new Error("请先保存最低亮度。" );
-      const target = clampBrightness(value, this.state.minimum);
+      if (this.state.current === null) throw new Error("尚未取得当前亮度，请先重新检查状态。" );
+      const target = clampBrightness(value, this.state.minimum ?? 0);
       this.queued = target;
       this.update({ requested: target, error: null, message: null });
       if (!this.running) void this.drain();
     } catch (error) { this.update({ error: error instanceof Error ? error.message : "亮度值无效。" }); }
+  }
+
+  adjustBrightness(delta: number): void {
+    if (this.disposed) return;
+    if (!Number.isFinite(delta)) {
+      this.update({ error: "微调步长无效。" });
+      return;
+    }
+    const current = this.state.requested ?? this.state.current;
+    if (current === null) {
+      this.update({ error: "尚未取得当前亮度，无法微调。" });
+      return;
+    }
+    this.setBrightness(Math.max(0, Math.min(1, current + delta)));
   }
 
   private async drain(): Promise<void> {
@@ -195,15 +212,14 @@ export class BrightnessController {
       while (this.queued !== null && !this.disposed) {
         if (!await this.refresh()) throw new Error(this.state.backend?.environment.reason || "无法确认设备状态。");
         if (this.disposed || this.queued === null || !this.state.manualConfirmed) break;
-        const minimum = this.state.minimum;
-        if (minimum === null) throw new Error("尚未设置亮度下限。");
+        const minimum = this.state.minimum ?? 0;
         const target = clampBrightness(this.queued, minimum);
         this.queued = null;
         if (this.state.current === target) {
           this.update({ message: "系统回报已处于目标亮度。" });
           continue;
         }
-        await this.writeAndConfirm(target);
+        await this.writeAndConfirm(target, minimum);
         if (this.queued === null) this.update({ message: "系统已确认亮度。" });
       }
     } catch (error) {
@@ -215,7 +231,7 @@ export class BrightnessController {
     }
   }
 
-  private writeAndConfirm(target: number): Promise<void> {
+  private writeAndConfirm(target: number, minimum: number): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("插件已卸载。"));
     return new Promise<void>((resolve, reject) => {
       let observed = false;
@@ -229,7 +245,7 @@ export class BrightnessController {
         this.confirmation = null;
         if (error) reject(error); else resolve();
       };
-      this.confirmation = { target, resolve: () => {
+      this.confirmation = { target, minimum, resolve: () => {
         observed = true;
         if (accepted) finish();
       }, reject: error => finish(error) };

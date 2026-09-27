@@ -46,7 +46,7 @@ const context = {
     createElement: jsx,
   },
   SP_JSX: { jsx, jsxs: jsx, Fragment: Symbol("fragment") },
-  DFL: Object.fromEntries(["PanelSection", "PanelSectionRow", "ButtonItem", "ToggleField", "SliderField"]
+  DFL: Object.fromEntries(["PanelSection", "PanelSectionRow", "ButtonItem", "ToggleField", "SliderField", "DialogButton", "Focusable"]
     .map(name => [name, name])),
 };
 context.DFL.staticClasses = { Title: "title" };
@@ -61,7 +61,7 @@ function nodes(node) {
   if (!node || typeof node !== "object") return [];
   return [node, ...nodes(node.props?.children)];
 }
-function panel() { return nodes(plugin.content.type(plugin.content.props)); }
+function panel(target = plugin) { return nodes(target.content.type(target.content.props)); }
 let content = panel();
 let slider = content.find(node => node.type === "SliderField");
 assert.equal(slider.props.min, floor * 100);
@@ -82,4 +82,34 @@ plugin.onDismount();
 assert.equal(unregisters, 1);
 assert.equal(intervals, 1);
 assert.equal(clears, 1);
-console.log("Compiled plugin loads, restores calibration, clamps slider and button, and unloads cleanly (mock Steam/Decky).");
+
+backend.minimum_brightness = null;
+const calibration = context.pluginFactory();
+await wait();
+content = panel(calibration);
+slider = content.find(node => node.type === "SliderField");
+assert.equal(slider.props.min, 0);
+assert.equal(slider.props.step, 0.01);
+assert.equal(slider.props.minimumDpadGranularity, 0.01);
+assert.equal(slider.props.disabled, true);
+content.find(node => node.type === "ToggleField").props.onChange(true);
+content = panel(calibration);
+assert.equal(content.find(node => node.type === "SliderField").props.disabled, false);
+const microButton = content.find(node => node.type === "DialogButton" &&
+  node.props.children.join("") === "−0.01%");
+assert.equal(microButton.props.disabled, false);
+microButton.props.onClick();
+await wait();
+assert.equal(writes.at(-1), 0.6999);
+assert.equal(content.find(node => node.type === "ButtonItem" && node.props.children === "回到最低亮度").props.disabled, true);
+content = panel(calibration);
+content.find(node => node.type === "ButtonItem" && node.props.children === "将当前亮度保存为下限").props.onClick();
+await wait();
+content = panel(calibration);
+assert.equal(content.find(node => node.type === "SliderField").props.min, 69.99);
+assert.equal(content.find(node => node.type === "DialogButton" && node.props.children.join("") === "−0.01%").props.disabled, true);
+calibration.onDismount();
+assert.equal(unregisters, 2);
+assert.equal(intervals, 2);
+assert.equal(clears, 2);
+console.log("Compiled plugin calibrates without a floor, micro-adjusts, saves exact calibration, enforces the saved floor and unloads cleanly (mock Steam/Decky).");

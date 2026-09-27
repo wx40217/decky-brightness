@@ -2,23 +2,25 @@
 
 Brightness Floor — a Decky plugin for Steam Deck OLED that remembers a user-calibrated minimum brightness and clamps its own brightness controls.
 
-为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。首版 0.1.1 使用手动调节；系统自适应下限尚未开放。真机 SDR、HDR 和刷新率兼容性待验证。
+为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。首版 0.1.2 使用手动调节；系统自适应下限尚未开放。真机 SDR、HDR 和刷新率兼容性待验证。
 
 [下载预发布安装包](https://github.com/wx40217/decky-brightness/releases) · [反馈问题](https://github.com/wx40217/decky-brightness/issues)
 
 ## 安装与使用
 
-1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.1.zip` 复制到 Deck，无需解压。
+1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.2.zip` 复制到 Deck，无需解压。
 2. 在游戏模式打开 Decky 设置，启用开发者模式，使用“从 ZIP 安装插件 / Install Plugin from ZIP”选择安装包。
-3. 关闭 Steam 系统自适应亮度，用系统滑块找到你确认可接受的最低亮度。
-4. 打开“亮度下限”，点击“将当前亮度保存为下限”。若还未取得当前值，先在系统中略微调亮，再回到所需位置。
-5. 确认“我已关闭系统自适应”，之后通过插件滑块调光。“回到最低亮度”可直接回到保存的位置。
+3. 关闭 Steam 系统自适应亮度，打开“亮度下限”，确认“我已关闭系统自适应”。
+4. 未保存下限时，“校准亮度”滑块可在 0–100% 范围内调节。用滑块粗定位，再用 ±0.01、±0.1 个百分点的按钮微调到你确认可接受的位置，点击“将当前亮度保存为下限”。若还未取得当前值，先在系统中略微调亮，再回到所需位置。
+5. 保存后，滑块和微调按钮都限制在已保存下限至 100% 范围内。“回到最低亮度”可直接回到保存的位置。
 
 下限以原始数值保存在 Decky 的插件设置目录中；关闭面板、重启和正常更新不会清除它。每次插件重新加载后需重新确认系统自适应已关闭。插件不会在启动时自动改变亮度；需要时点击“回到最低亮度”。
 
 系统滑块、亮度快捷键和系统自适应仍可能使亮度低于下限。插件不使用事后调回机制，不宣称全局保护。外接显示器连接、桌面模式、非 OLED 设备或无法确认内置屏幕时，插件暂停调光。卸载清除监听，保持卸载当时亮度。
 
-界面显示的是 Steam 亮度控制值，不是实测屏幕亮度或频闪检测。设置后必须收到符合目标值且不低于下限的系统回报才显示确认；没有回报、接口失败或回报无效时会提示错误。系统回报也不等于物理屏幕测量。
+滑块步长为 0.01 个百分点，微调按钮从当前值或尚在处理的目标值累加，不会按显示百分比取整。实际可区分的亮度级数取决于 SteamOS 和屏幕。
+
+界面显示的是 Steam 亮度控制值，不是实测屏幕亮度或频闪检测。设置后必须收到符合目标值的系统回报才显示确认，保存下限后还要求回报不低于下限；没有回报、接口失败或回报无效时会提示错误。系统回报也不等于物理屏幕测量。
 
 ## 开发
 
@@ -38,7 +40,7 @@ npm run package
 
 ZIP 包含一个 `decky-brightness-floor/` 顶层目录及编译后的 `dist/index.js`。无须在 Deck 上安装 Node.js 或编译插件。
 
-亮度接口参考 [Decky Display 类型定义](https://github.com/SteamDeckHomebrew/decky-frontend-lib/blob/main/src/globals/steam-client/system/Display.ts)。控制器随插件加载，独立于面板挂载；对快速连续请求合并待发送值，所有发送值均经过下限限制。没有对 Steam 全局接口做拦截。
+亮度接口参考 [Decky Display 类型定义](https://github.com/SteamDeckHomebrew/decky-frontend-lib/blob/main/src/globals/steam-client/system/Display.ts)。控制器随插件加载，独立于面板挂载；对快速连续请求合并待发送值，未设置下限时允许完整范围校准，设置后所有发送值均经过下限限制。没有对 Steam 全局接口做拦截。
 
 后续验证重点：系统版本与接口回报、调亮后返回精确下限、关闭面板与重新打开、睡眠唤醒与重启、进出 SDR/HDR 游戏及 45/60/90 Hz、外接屏幕暂停。系统自适应需额外证明在实际生效前受限且不会争抢，才能开放。
 

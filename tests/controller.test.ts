@@ -14,7 +14,7 @@ async function idle(controller: BrightnessController): Promise<void> {
   assert.equal(controller.getSnapshot().busy, false, "controller did not become idle");
 }
 
-async function harness(options: { initialEvent?: number; floor?: number | null; timeout?: number } = {}) {
+async function harness(options: { initialEvent?: number | null; floor?: number | null; timeout?: number } = {}) {
   const backend = initial();
   if (options.floor !== undefined) backend.minimum_brightness = options.floor;
   let notify: (data: { flBrightness: number }) => void = () => {};
@@ -23,10 +23,11 @@ async function harness(options: { initialEvent?: number; floor?: number | null; 
   let rejectRead = false;
   const writes: number[] = [];
   let writer: (value: number) => unknown = value => { queueMicrotask(() => notify({ flBrightness: value })); };
+  const initialEvent = options.initialEvent === undefined ? 0.5 : options.initialEvent;
   const display: DisplayAPI = {
     RegisterForBrightnessChanges(callback) {
       notify = callback;
-      if (options.initialEvent !== undefined) callback({ flBrightness: options.initialEvent });
+      if (initialEvent !== null) callback({ flBrightness: initialEvent });
       return { unregister() { removed++; } };
     },
     SetBrightness(value) { writes.push(value); return writer(value); },
@@ -59,14 +60,76 @@ test("brightness validation and floor keep exact calibration at all boundaries",
   assert.equal(clampBrightness(0, 1), 1);
 });
 
-test("no invented initial brightness and no uncalibrated writes", async t => {
-  const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
+test("missing current brightness blocks calibration writes instead of inventing a value", async t => {
+  const h = await harness({ floor: null, initialEvent: null }); t.after(() => h.controller.dispose());
   assert.equal(h.controller.getSnapshot().current, null);
   await h.controller.saveCurrentMinimum();
   assert.match(h.controller.getSnapshot().error!, /尚未取得/);
   h.controller.confirmManual(true);
   h.controller.setBrightness(0.5);
+  h.controller.adjustBrightness(0.0001);
   assert.deepEqual(h.writes, []);
+});
+
+test("unconfigured calibration supports fine changes and the full normalized range", async t => {
+  const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
+  h.controller.setBrightness(0.4);
+  assert.deepEqual(h.writes, [], "manual confirmation is still required");
+  h.controller.confirmManual(true);
+  h.controller.adjustBrightness(-0.0001);
+  await idle(h.controller);
+  assert.deepEqual(h.writes, [0.4999]);
+  assert.equal(h.controller.getSnapshot().minimum, null);
+  for (const target of [0, 1]) {
+    h.controller.setBrightness(target);
+    await idle(h.controller);
+    assert.equal(h.controller.getSnapshot().current, target);
+    assert.equal(h.controller.getSnapshot().error, null);
+  }
+});
+
+test("saving calibration changes every subsequent adjustment to respect the exact floor", async t => {
+  const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
+  h.controller.confirmManual(true);
+  h.controller.adjustBrightness(0.0001);
+  await idle(h.controller);
+  await h.controller.saveCurrentMinimum();
+  const floor = h.controller.getSnapshot().minimum!;
+  assert.equal(floor, 0.5001);
+  h.controller.adjustBrightness(-0.001);
+  await idle(h.controller);
+  h.controller.setBrightness(0.8);
+  await idle(h.controller);
+  h.controller.setBrightness(0);
+  await idle(h.controller);
+  assert.deepEqual(h.writes, [floor, 0.8, floor]);
+});
+
+test("rapid micro adjustments accumulate from the requested value without dropping clicks", async t => {
+  const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
+  h.controller.confirmManual(true);
+  h.writeWith(() => undefined);
+  h.controller.adjustBrightness(0.0001);
+  await tick();
+  h.controller.adjustBrightness(0.0001);
+  h.controller.adjustBrightness(0.0001);
+  h.writeWith(value => queueMicrotask(() => h.notify(value)));
+  h.notify(0.5001);
+  await idle(h.controller);
+  assert.equal(h.writes.length, 2);
+  assert(Math.abs(h.writes[1] - 0.5003) < 1e-12);
+  h.controller.adjustBrightness(NaN);
+  assert.equal(h.writes.length, 2);
+});
+
+test("an unchanged brightness report cannot confirm a fine adjustment", async t => {
+  const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
+  h.controller.confirmManual(true);
+  h.writeWith(() => h.notify(0.5));
+  h.controller.adjustBrightness(0.0001);
+  await idle(h.controller);
+  assert.match(h.controller.getSnapshot().error!, /未收到/);
+  assert.equal(h.controller.getSnapshot().message, null);
 });
 
 test("calibration survives panel subscriptions, uses unrounded latest observation", async t => {

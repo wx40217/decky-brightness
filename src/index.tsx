@@ -1,4 +1,4 @@
-import { ButtonItem, PanelSection, PanelSectionRow, SliderField, ToggleField, staticClasses } from "@decky/ui";
+import { ButtonItem, DialogButton, Focusable, PanelSection, PanelSectionRow, SliderField, ToggleField, staticClasses } from "@decky/ui";
 import { callable, definePlugin } from "@decky/api";
 import { useSyncExternalStore } from "react";
 import { FaSun } from "react-icons/fa";
@@ -15,7 +15,9 @@ function percentage(value: number | null): string {
 function Content({ controller }: { controller: BrightnessController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const allowed = state.connected && state.backend?.environment.allowed === true;
-  const canAdjust = allowed && state.manualConfirmed && state.minimum !== null;
+  const canAdjust = allowed && state.manualConfirmed && state.current !== null &&
+    !(state.busy && state.requested === null);
+  const minimum = state.minimum ?? 0;
   const value = state.requested ?? state.current ?? state.minimum ?? 0;
   const reason = state.backend?.environment.reason;
   const unavailable = !state.connected ? state.error : reason || (!state.backend ? state.error : null);
@@ -32,7 +34,7 @@ function Content({ controller }: { controller: BrightnessController }) {
       <PanelSectionRow>
         <div style={{ fontSize: 12, lineHeight: 1.6 }}>
           {state.minimum === null
-            ? "先关闭系统自适应，再用系统亮度调节找到你可接受的最低位置，然后保存。"
+            ? "先关闭系统自适应，用下方滑块和微调按钮找到你可接受的最低位置，然后保存。尚未保存时可在 0–100% 范围内校准。"
             : "调整下限时，请先用系统调节到确认可接受的位置，再重新保存。"}
           {state.current === null && " 尚未收到亮度回报时，请先在系统中略微调亮，再调到需要的位置。"}
         </div>
@@ -55,17 +57,32 @@ function Content({ controller }: { controller: BrightnessController }) {
         <ToggleField label="我已关闭系统自适应" checked={state.manualConfirmed}
           disabled={!allowed} onChange={value => controller.confirmManual(value)} />
       </PanelSectionRow>
-      {state.minimum !== null && state.minimum < 1 && <PanelSectionRow>
-        <SliderField label="调节亮度" min={state.minimum * 100} max={100} step={0.1}
-          value={Math.max(state.minimum * 100, Math.min(100, value * 100))}
+      {minimum < 1 && <PanelSectionRow>
+        <SliderField label={state.minimum === null ? "校准亮度" : "调节亮度"}
+          min={minimum * 100} max={100} step={0.01} minimumDpadGranularity={0.01}
+          notchTicksVisible={false}
+          value={Math.max(minimum * 100, Math.min(100, value * 100))}
           showValue={false} disabled={!canAdjust}
           onChange={value => controller.setBrightness(value / 100)} />
       </PanelSectionRow>}
+      <PanelSectionRow>
+        <div style={{ fontSize: 12, marginBottom: 8 }}>微调：每次 0.01 或 0.1 个百分点</div>
+        <Focusable style={{ display: "flex", gap: 4 }} flow-children="row">
+          {[-0.001, -0.0001, 0.0001, 0.001].map(delta =>
+            <DialogButton key={delta}
+              style={{ minWidth: 0, padding: "8px 2px", flex: 1, fontSize: 12 }}
+              disabled={!canAdjust ||
+                (delta < 0 ? value <= minimum : value >= 1)}
+              onClick={() => controller.adjustBrightness(delta)}>
+              {delta < 0 ? "−" : "+"}{Math.abs(delta * 100).toFixed(delta === -0.001 || delta === 0.001 ? 1 : 2)}%
+            </DialogButton>)}
+        </Focusable>
+      </PanelSectionRow>
       {state.minimum === 1 && <PanelSectionRow>
         <div style={{ fontSize: 12 }}>下限已设为最大亮度，没有可调范围。</div>
       </PanelSectionRow>}
       <PanelSectionRow>
-        <ButtonItem layout="below" disabled={!canAdjust || state.busy}
+        <ButtonItem layout="below" disabled={!canAdjust || state.minimum === null || state.busy}
           onClick={() => { if (state.minimum !== null) controller.setBrightness(state.minimum); }}>
           回到最低亮度
         </ButtonItem>
