@@ -87,6 +87,23 @@ class EnvironmentTests(unittest.TestCase):
         self.assertTrue(state["allowed"])
         self.assertEqual(state["steamos_version"], "3.7.0")
 
+    def test_gamescope_main_thread_name_still_identifies_game_mode(self):
+        self.write("proc/100/comm", "gamescope-wl")
+        state = self.probe.inspect()
+        self.assertTrue(state["allowed"])
+        self.assertEqual(state["gamescope_process"], "gamescope-wl")
+
+    def test_executable_identity_survives_other_thread_names(self):
+        self.write("proc/100/comm", "renamed-thread")
+        with patch.object(Path, "readlink", return_value=Path("/usr/bin/gamescope")):
+            self.assertTrue(self.probe.inspect()["allowed"])
+        with patch.object(Path, "readlink", return_value=Path("/usr/bin/steam")):
+            self.assertFalse(self.probe.inspect()["allowed"])
+
+    def test_gamescope_prefix_alone_does_not_enable_control(self):
+        self.write("proc/100/comm", "gamescope-helper")
+        self.assertFalse(self.probe.inspect()["allowed"])
+
     def test_external_connected_blocks_even_if_not_enabled(self):
         self.write("sys/class/drm/card1-HDMI-A-1/status", "connected")
         self.write("sys/class/drm/card1-HDMI-A-1/enabled", "disabled")

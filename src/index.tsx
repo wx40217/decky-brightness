@@ -18,6 +18,7 @@ function Content({ controller }: { controller: BrightnessController }) {
   const canAdjust = allowed && state.manualConfirmed && state.minimum !== null;
   const value = state.requested ?? state.current ?? state.minimum ?? 0;
   const reason = state.backend?.environment.reason;
+  const unavailable = !state.connected ? state.error : reason || (!state.backend ? state.error : null);
 
   return <>
     <PanelSection title="最低可接受亮度">
@@ -25,6 +26,7 @@ function Content({ controller }: { controller: BrightnessController }) {
         <div style={{ fontSize: 13, lineHeight: 1.6 }}>
           当前亮度：{percentage(state.current)}<br />
           已保存下限：{state.minimum === null ? "未设置" : percentage(state.minimum)}
+          {unavailable && <div role="status" style={{ color: "#ffb86b" }}>{unavailable}</div>}
         </div>
       </PanelSectionRow>
       <PanelSectionRow>
@@ -70,7 +72,7 @@ function Content({ controller }: { controller: BrightnessController }) {
       </PanelSectionRow>
       <PanelSectionRow>
         <div role="status" style={{ fontSize: 12, lineHeight: 1.6 }}>
-          {reason || state.error || state.backend?.settings_error ||
+          {state.error || reason || state.backend?.settings_error ||
             (state.busy ? "正在处理，等待系统确认…" : state.message) || "仅管理游戏模式内置屏幕。"}
           {state.current !== null && state.minimum !== null && state.current < state.minimum &&
             <div style={{ color: "#ffb86b" }}>当前亮度低于已保存下限，请关闭自适应并点击“回到最低亮度”。</div>}

@@ -2,13 +2,13 @@
 
 Brightness Floor — a Decky plugin for Steam Deck OLED that remembers a user-calibrated minimum brightness and clamps its own brightness controls.
 
-为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。首版 0.1.0 使用手动调节；系统自适应下限尚未开放。真机 SDR、HDR 和刷新率兼容性待验证。
+为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。首版 0.1.1 使用手动调节；系统自适应下限尚未开放。真机 SDR、HDR 和刷新率兼容性待验证。
 
 [下载预发布安装包](https://github.com/wx40217/decky-brightness/releases) · [反馈问题](https://github.com/wx40217/decky-brightness/issues)
 
 ## 安装与使用
 
-1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.0.zip` 复制到 Deck，无需解压。
+1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.1.zip` 复制到 Deck，无需解压。
 2. 在游戏模式打开 Decky 设置，启用开发者模式，使用“从 ZIP 安装插件 / Install Plugin from ZIP”选择安装包。
 3. 关闭 Steam 系统自适应亮度，用系统滑块找到你确认可接受的最低亮度。
 4. 打开“亮度下限”，点击“将当前亮度保存为下限”。若还未取得当前值，先在系统中略微调亮，再回到所需位置。

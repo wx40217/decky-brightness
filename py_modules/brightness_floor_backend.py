@@ -79,6 +79,26 @@ class Environment:
         except (OSError, UnicodeError):
             return ""
 
+    def gamescope_process(self):
+        try:
+            processes = self.proc.iterdir()
+            for process in processes:
+                if not process.name.isdigit():
+                    continue
+                name = self.read(process / "comm")
+                # wlserver_run renames the main thread, and /proc/<pid>/comm
+                # reports that thread name rather than the executable name.
+                if name in ("gamescope", "gamescope-wl"):
+                    return name
+                try:
+                    if (process / "exe").readlink().name == "gamescope":
+                        return name or "gamescope"
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        return ""
+
     def inspect(self):
         dmi = self.sys / "class/dmi/id"
         model = self.read(dmi / "product_name") or self.read(dmi / "board_name")
@@ -93,6 +113,7 @@ class Environment:
             "kernel": platform.release(),
             "allowed": False,
             "reason": "",
+            "gamescope_process": "",
         }
         if platform.system() != "Linux":
             result["reason"] = "仅支持 Steam Deck OLED 的 SteamOS 游戏模式。"
@@ -100,12 +121,8 @@ class Environment:
         if model != "Galileo" and self.read(dmi / "board_name") != "Galileo":
             result["reason"] = "未识别为 Steam Deck OLED，亮度控制已停用。"
             return result
-        try:
-            game_mode = any(self.read(p / "comm") == "gamescope"
-                            for p in self.proc.iterdir() if p.name.isdigit())
-        except OSError:
-            game_mode = False
-        if not game_mode:
+        result["gamescope_process"] = self.gamescope_process()
+        if not result["gamescope_process"]:
             result["reason"] = "未检测到游戏模式，亮度控制已停用。"
             return result
         internal_active = False

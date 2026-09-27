@@ -1,6 +1,6 @@
 {
   "name": "decky-brightness-floor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Steam Deck OLED brightness floor with precise calibration",
   "type": "module",
   "license": "BSD-3-Clause",
@@ -10,7 +10,9 @@
     "url": "git+https://github.com/wx40217/decky-brightness.git"
   },
   "homepage": "https://github.com/wx40217/decky-brightness#readme",
-  "bugs": { "url": "https://github.com/wx40217/decky-brightness/issues" },
+  "bugs": {
+    "url": "https://github.com/wx40217/decky-brightness/issues"
+  },
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "build": "rollup -c",
