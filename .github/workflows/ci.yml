@@ -1,0 +1,41 @@
+name: Verify and build plugin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Install locked dependencies
+        run: npx --yes pnpm@9.15.9 install --frozen-lockfile
+      - name: Type check
+        run: npm run typecheck
+      - name: Controller tests
+        run: npm test
+      - name: Backend and loader tests
+        run: npm run test:python
+      - name: Build and verify compiled plugin
+        run: |
+          npm run build
+          npm run verify:bundle
+      - name: Package installable ZIP
+        run: npm run package
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: decky-brightness-floor
+          path: artifacts/*.zip
+          if-no-files-found: error

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+artifacts/
+__pycache__/
+*.pyc
+.env
+.env.*
+.vscode/settings.json
+.agents/
+skills-lock.json

@@ -1,0 +1,10 @@
+{
+  "name": "亮度下限",
+  "author": "wx40217",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["brightness", "utility"],
+    "description": "保存 Steam Deck OLED 的最低可接受亮度，并在插件内安全调节。"
+  }
+}

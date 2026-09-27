@@ -1,0 +1,38 @@
+{
+  "name": "decky-brightness-floor",
+  "version": "0.1.0",
+  "description": "Steam Deck OLED brightness floor with precise calibration",
+  "type": "module",
+  "license": "BSD-3-Clause",
+  "author": "wx40217",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wx40217/decky-brightness.git"
+  },
+  "homepage": "https://github.com/wx40217/decky-brightness#readme",
+  "bugs": { "url": "https://github.com/wx40217/decky-brightness/issues" },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "rollup -c",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:python": "python -m unittest discover -s tests -p test_*.py",
+    "verify:bundle": "node scripts/verify_bundle.mjs",
+    "package": "python scripts/package_plugin.py"
+  },
+  "dependencies": {
+    "@decky/api": "1.1.3",
+    "react-icons": "5.3.0",
+    "tslib": "2.8.1"
+  },
+  "devDependencies": {
+    "@decky/rollup": "1.0.2",
+    "@decky/ui": "4.11.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "19.1.1",
+    "@types/react-dom": "19.1.1",
+    "rollup": "^4.53.3",
+    "tsx": "^4.20.0",
+    "typescript": "^5.6.2"
+  }
+}
