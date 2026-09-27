@@ -26,7 +26,9 @@ Brightness Floor — a Decky plugin for Steam Deck OLED that remembers a user-ca
 
 面板使用系统已有的简体中文 Noto 字体，统一中文与数字字形，并增大微调按钮和状态文字；日常界面只显示亮度、下限、自适应状态和操作。异常提示按当前状态显示，开发兼容性说明留在仓库文档中。
 
-已在 Steam Deck OLED、SteamOS 3.8.28、Decky 3.2.9 的游戏模式菜单验证：90 Hz 下切换 SDR 输出与 HDR 输出时，插件调亮、返回精确下限均成功，系统实际背光读数随调节变化。HDR 输出模式下测试的内容仍是 SDR 菜单，不能据此宣称 HDR 游戏内容或物理频闪已验证。45/60 Hz 请求在菜单中未实际生效，合成器仍回报 90 Hz，需进入游戏后另行验证。
+已在 Steam Deck OLED、SteamOS 3.8.28、Decky 3.2.9、Gamescope 3.16.23.6 上验证：《赛博朋克 2077》的 SDR 与 HDR10 PQ 动态 3D 基准场景，在实际 60、90 Hz 下，关闭插件面板后调亮、返回精确下限均成功。刷新率以合成器实际反馈为准；HDR 另核实了游戏 HDR 内容反馈与元数据。45 的目标帧率请求被映射成 90 Hz，实际 45 Hz 尚未验证。
+
+同一个 44.08136% 控制值在 SDR、HDR 下对应的实际背光读数不同；上述验证只证明插件调光及下限有效，不证明物理频闪已消除。测试临时绕过了 MAKO 启动包装器（其配置隐藏 HDR），结束后恢复原启动参数和游戏 HDR 设置；开启 MAKO 时的 HDR 组合尚未验证。
 
 ## 开发
 
@@ -48,7 +50,7 @@ ZIP 包含一个 `decky-brightness-floor/` 顶层目录及编译后的 `dist/ind
 
 亮度接口参考 [Decky Display 类型定义](https://github.com/SteamDeckHomebrew/decky-frontend-lib/blob/main/src/globals/steam-client/system/Display.ts)。系统自适应状态读取 `CMsgSystemManagerSettings` 的 `display_adaptive_brightness_enabled` 字段（7）；未携带该字段的增量通知不会被误判为关闭。控制器随插件加载，独立于面板挂载，对快速连续请求合并待发送值，所有发送值均经过当前下限限制。没有对 Steam 全局接口做拦截。
 
-后续验证重点：睡眠唤醒与重启、实际 SDR/HDR 游戏内容及 45/60 Hz、外接屏幕暂停。系统自适应需额外证明在实际生效前受限且不会争抢，才能开放。
+后续验证重点：睡眠唤醒与重启、实际 45 Hz、开启 MAKO 时的 HDR 组合、外接屏幕暂停。系统自适应需额外证明在实际生效前受限且不会争抢，才能开放。
 
 ## 发布方式
 
