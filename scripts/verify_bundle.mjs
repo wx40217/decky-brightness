@@ -4,6 +4,8 @@ import vm from "node:vm";
 
 const source = readFileSync(new URL("../dist/index.js", import.meta.url), "utf8");
 assert(source.includes("export { index as default };"));
+for (const language of ["schinese", "english"]) {
+const label = (chinese, english) => language === "schinese" ? chinese : english;
 const floor = 0.2345678912345;
 let notify;
 let unregisters = 0;
@@ -23,6 +25,7 @@ const backend = {
 const jsx = (type, props) => ({ type, props });
 const context = {
   console, setTimeout, clearTimeout, queueMicrotask,
+  navigator: { languages: ["zh-CN"] },
   setInterval() { intervals++; return intervals; },
   clearInterval() { clears++; },
   window: {
@@ -39,7 +42,7 @@ const context = {
         } };
       },
     },
-    SteamClient: { System: {
+    SteamClient: { Settings: { async GetCurrentLanguage() { return language; } }, System: {
       RegisterForSettingsChanges(callback) {
         settingsListeners.add(callback);
         callback(new Uint8Array([56, adaptive ? 1 : 0]));
@@ -75,13 +78,19 @@ function nodes(node) {
 }
 function panel(target = plugin) { return nodes(target.content.type(target.content.props)); }
 let content = panel();
+assert.equal(plugin.content.props.localization.getSnapshot(), label("zh-CN", "en"));
+assert.equal(plugin.titleView.type(plugin.titleView.props).props.children, label("亮度下限", "Brightness Floor"));
+assert.equal(content[0].props.lang, label("zh-CN", "en"));
 let slider = content.find(node => node.type === "SliderField");
+assert.equal(slider.props.label, label("亮度", "Brightness"));
 assert.equal(slider.props.min, floor * 100);
 assert.equal(slider.props.disabled, false);
 assert(!content.some(node => node.type === "ToggleField"), "manual acknowledgement must be removed");
 setAdaptive(true);
 content = panel();
 assert.equal(content.find(node => node.type === "SliderField").props.disabled, true);
+assert.equal(content.find(node => node.props?.role === "status").props.children,
+  label("请关闭系统自适应后调光。", "Turn off system adaptive brightness to adjust."));
 setAdaptive(false);
 content = panel();
 slider = content.find(node => node.type === "SliderField");
@@ -90,9 +99,16 @@ slider.props.onChange(0);
 await wait();
 assert.deepEqual(writes, [floor]);
 content = panel();
-content.find(node => node.type === "ButtonItem" && node.props.children === "回到最低亮度").props.onClick();
+content.find(node => node.type === "ButtonItem" && node.props.children === label("回到最低亮度", "Return to minimum")).props.onClick();
 await wait();
 assert.deepEqual(writes, [floor], "already-at-floor button should avoid an unnecessary write");
+backend.environment.allowed = false;
+backend.environment.reason = "检测到外接显示器，插件调光已暂停。";
+await plugin.content.props.controller.refresh();
+assert.equal(panel().find(node => node.props?.role === "status").props.children,
+  label(backend.environment.reason, "An external display is connected. Plugin brightness control is paused."));
+backend.environment.allowed = true;
+backend.environment.reason = "";
 plugin.onDismount();
 plugin.onDismount();
 assert.equal(unregisters, 1);
@@ -118,16 +134,21 @@ assert.equal(microButton.props.disabled, false);
 microButton.props.onClick();
 await wait();
 assert.equal(writes.at(-1), 0.6999);
-assert.equal(content.find(node => node.type === "ButtonItem" && node.props.children === "回到最低亮度").props.disabled, false);
+assert.equal(content.find(node => node.type === "ButtonItem" && node.props.children === label("回到最低亮度", "Return to minimum")).props.disabled, false);
 content = panel(calibration);
-content.find(node => node.type === "ButtonItem" && node.props.children === "将当前亮度设为下限").props.onClick();
+content.find(node => node.type === "ButtonItem" && node.props.children === label("将当前亮度设为下限", "Save current as minimum")).props.onClick();
 await wait();
 content = panel(calibration);
 assert.equal(content.find(node => node.type === "SliderField").props.min, 69.99);
 assert.equal(content.find(node => node.type === "DialogButton" && node.props.children.join("") === "−0.01%").props.disabled, true);
+notify({ flBrightness: NaN });
+content = panel(calibration);
+assert.equal(content.find(node => node.props?.role === "status").props.children,
+  label("系统返回了无法识别的亮度值，无法确认当前亮度。", "Steam returned an invalid brightness value. Current brightness cannot be confirmed."));
 calibration.onDismount();
 assert.equal(unregisters, 2);
 assert.equal(intervals, 2);
 assert.equal(clears, 2);
 assert.equal(settingsListeners.size, 0);
-console.log("Compiled plugin uses the default floor, reads system adaptive state, gates controls automatically, micro-adjusts, preserves custom floors and cleans up listeners (mock Steam/Decky).");
+console.log(`Compiled plugin verified in ${language}: localized UI and errors, exact floors, fine adjustments, adaptive gating and listener cleanup (mock Steam/Decky).`);
+}

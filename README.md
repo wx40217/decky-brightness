@@ -1,14 +1,18 @@
 # 亮度下限
 
+[English](README.en.md) · 简体中文
+
 Brightness Floor — a Decky plugin for Steam Deck OLED that remembers a user-calibrated minimum brightness and clamps its own brightness controls.
 
-为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。当前版本 0.1.4 使用手动调节，自动读取系统自适应状态；系统自适应下限尚未开放。
+为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。当前版本 0.1.5 使用手动调节，自动读取系统自适应状态；系统自适应下限尚未开放。
 
 [下载预发布安装包](https://github.com/wx40217/decky-brightness/releases) · [反馈问题](https://github.com/wx40217/decky-brightness/issues)
 
+> **默认 44% 仅来自作者在自己那台 Steam Deck OLED 上的个人测试，不是通用的“不频闪阈值”。** 其他机器、SDR/HDR、刷新率和个人感受可能不同，44% 不保证适合你，也不保证消除频闪。请在自己的设备及常用显示模式下确认可接受的亮度，再保存自定义下限。
+
 ## 安装与使用
 
-1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.4.zip` 复制到 Deck，无需解压。
+1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.5.zip` 复制到 Deck，无需解压。
 2. 在游戏模式打开 Decky 设置，启用开发者模式，使用“从 ZIP 安装插件 / Install Plugin from ZIP”选择安装包。
 3. 关闭 Steam 系统自适应亮度并打开“亮度下限”。插件直接读取系统开关，显示“系统自适应：关闭”后即可调光，无须额外勾选确认。
 4. 没有自定义配置时，默认下限为 44%，来自作者在自己的 Steam Deck OLED 上的校准。滑块和 ±0.01、±0.1 个百分点微调按钮均在当前下限至 100% 范围内调节。“回到最低亮度”可回到该下限。
@@ -26,9 +30,13 @@ Brightness Floor — a Decky plugin for Steam Deck OLED that remembers a user-ca
 
 面板使用系统已有的简体中文 Noto 字体，统一中文与数字字形，并增大微调按钮和状态文字；日常界面只显示亮度、下限、自适应状态和操作。异常提示按当前状态显示，开发兼容性说明留在仓库文档中。
 
+界面及异常提示支持简体中文、英文，加载时优先读取 Steam 界面语言；中文语言使用简体中文，其他语言使用英文。Steam 语言接口不可用时采用浏览器首选语言，再回退到英文。更改 Steam 语言后重新加载插件或重启 Steam 即可。插件内部名称保持“亮度下限”，以保留升级时的身份和配置。
+
 已在 Steam Deck OLED、SteamOS 3.8.28、Decky 3.2.9、Gamescope 3.16.23.6 上验证：《赛博朋克 2077》的 SDR 与 HDR10 PQ 动态 3D 基准场景，在实际 60、90 Hz 下，关闭插件面板后调亮、返回精确下限均成功。刷新率以合成器实际反馈为准；HDR 另核实了游戏 HDR 内容反馈与元数据。45 的目标帧率请求被映射成 90 Hz，实际 45 Hz 尚未验证。
 
 同一个 44.08136% 控制值在 SDR、HDR 下对应的实际背光读数不同；上述验证只证明插件调光及下限有效，不证明物理频闪已消除。测试临时绕过了 MAKO 启动包装器（其配置隐藏 HDR），结束后恢复原启动参数和游戏 HDR 设置；开启 MAKO 时的 HDR 组合尚未验证。
+
+在上述设备上另做了环境光变化测试：系统自适应将亮度从 75% 降至约 58.2%，没有经过前端 `SetBrightness` 拦截。原生自适应最小/最大值可读取，但测试写入没有生效。因此当前版本仅监听自适应开关，不开放系统自适应下限；以上结论限于已测试的 Steam/SteamOS 版本。
 
 ## 开发
 

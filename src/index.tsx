@@ -3,6 +3,8 @@ import { callable, definePlugin } from "@decky/api";
 import { useSyncExternalStore } from "react";
 import { FaSun } from "react-icons/fa";
 import { BrightnessController } from "./controller";
+import { Localization, translate } from "./i18n";
+import type { LanguageAPI, Locale } from "./i18n";
 import type { BackendState, DisplayAPI, SettingsState, SystemSettingsAPI } from "./types";
 
 const getState = callable<[], BackendState>("get_state");
@@ -16,12 +18,14 @@ const panelStyles = `
 }
 `;
 
-function percentage(value: number | null): string {
-  return value === null ? "尚未取得" : `${(value * 100).toFixed(2)}%`;
+function percentage(value: number | null, locale: Locale): string {
+  return value === null ? translate("尚未取得", locale) : `${(value * 100).toFixed(2)}%`;
 }
 
-function Content({ controller }: { controller: BrightnessController }) {
+function Content({ controller, localization }: { controller: BrightnessController; localization: Localization }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const locale = useSyncExternalStore(localization.subscribe, localization.getSnapshot);
+  const t = (message: string) => translate(message, locale);
   const allowed = state.connected && state.backend?.environment.allowed === true;
   const canAdjust = allowed && state.adaptiveEnabled === false && state.current !== null &&
     !(state.busy && state.requested === null);
@@ -36,20 +40,20 @@ function Content({ controller }: { controller: BrightnessController }) {
       state.minimum !== null && state.current < state.minimum ? "当前亮度低于下限，可点击“回到最低亮度”。" : null);
   const needsRefresh = !!state.error || !!state.adaptiveError || !state.backend || state.current === null;
 
-  return <div data-brightness-floor lang="zh-CN">
+  return <div data-brightness-floor lang={locale}>
     <style>{panelStyles}</style>
     <PanelSection>
       <PanelSectionRow>
         <div style={{ lineHeight: 1.6 }}>
-          <div style={{ fontSize: 20, fontWeight: 500 }}>当前亮度 {percentage(state.current)}</div>
+          <div style={{ fontSize: 20, fontWeight: 500 }}>{t("当前亮度")} {percentage(state.current, locale)}</div>
           <div style={{ fontSize: 14, color: "#b8bcbf" }}>
-            下限 {percentage(state.minimum)}{state.backend?.minimum_is_default && " · 默认"}
-            <br />自适应：{state.adaptiveEnabled === null ? "读取中" : state.adaptiveEnabled ? "开启" : "关闭"}
+            {t("下限")} {percentage(state.minimum, locale)}{state.backend?.minimum_is_default && t(" · 默认")}
+            <br />{t("自适应：")}{t(state.adaptiveEnabled === null ? "读取中" : state.adaptiveEnabled ? "开启" : "关闭")}
           </div>
         </div>
       </PanelSectionRow>
       {minimum < 1 && <PanelSectionRow>
-        <SliderField label="亮度"
+        <SliderField label={t("亮度")}
           min={minimum * 100} max={100} step={0.01} minimumDpadGranularity={0.01}
           notchTicksVisible={false}
           value={Math.max(minimum * 100, Math.min(100, value * 100))}
@@ -69,46 +73,56 @@ function Content({ controller }: { controller: BrightnessController }) {
         </Focusable>
       </PanelSectionRow>
       {state.minimum === 1 && <PanelSectionRow>
-        <div style={{ fontSize: 14 }}>下限已设为最大亮度。</div>
+        <div style={{ fontSize: 14 }}>{t("下限已设为最大亮度。")}</div>
       </PanelSectionRow>}
       <PanelSectionRow>
         <ButtonItem layout="below" disabled={!canAdjust || state.minimum === null || state.busy}
           onClick={() => { if (state.minimum !== null) controller.setBrightness(state.minimum); }}>
-          回到最低亮度
+          {t("回到最低亮度")}
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
         <ButtonItem layout="below" disabled={!canAdjust || state.busy}
           onClick={() => void controller.saveCurrentMinimum()}>
-          将当前亮度设为下限
+          {t("将当前亮度设为下限")}
         </ButtonItem>
       </PanelSectionRow>
       {status && <PanelSectionRow>
-        <div role="status" style={{ fontSize: 14, lineHeight: 1.5, color: "#ffb86b" }}>{status}</div>
+        <div role="status" style={{ fontSize: 14, lineHeight: 1.5, color: "#ffb86b" }}>{t(status)}</div>
       </PanelSectionRow>}
       {needsRefresh && <PanelSectionRow>
         <ButtonItem layout="below" disabled={state.busy} onClick={() => void controller.refresh()}>
-          重新读取状态
+          {t("重新读取状态")}
         </ButtonItem>
       </PanelSectionRow>}
       <PanelSectionRow>
         <div style={{ fontSize: 14, lineHeight: 1.5, color: "#b8bcbf" }}>
-          下限仅作用于插件内调光。
+          {t("下限仅作用于插件内调光。")}
         </div>
       </PanelSectionRow>
     </PanelSection>
   </div>;
 }
 
+function Title({ localization }: { localization: Localization }) {
+  const locale = useSyncExternalStore(localization.subscribe, localization.getSnapshot);
+  return <div className={staticClasses.Title} lang={locale} style={{ fontFamily }}>{translate("亮度下限", locale)}</div>;
+}
+
 export default definePlugin(() => {
-  const host = window as unknown as { SteamClient?: { System?: SystemSettingsAPI & { Display?: DisplayAPI } } };
+  const host = window as unknown as { SteamClient?: {
+    Settings?: LanguageAPI;
+    System?: SystemSettingsAPI & { Display?: DisplayAPI };
+  } };
+  const localization = new Localization(globalThis.navigator?.languages);
+  void localization.initialize(host.SteamClient?.Settings);
   const controller = new BrightnessController(host.SteamClient?.System?.Display, { getState, saveMinimum }, host.SteamClient?.System);
   void controller.start();
   return {
     name: "亮度下限",
-    titleView: <div className={staticClasses.Title} lang="zh-CN" style={{ fontFamily }}>亮度下限</div>,
-    content: <Content controller={controller} />,
+    titleView: <Title localization={localization} />,
+    content: <Content controller={controller} localization={localization} />,
     icon: <FaSun />,
-    onDismount() { controller.dispose(); },
+    onDismount() { controller.dispose(); localization.dispose(); },
   };
 });

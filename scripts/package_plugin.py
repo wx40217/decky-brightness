@@ -7,7 +7,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 root = Path(__file__).resolve().parents[1]
 package = json.loads((root / "package.json").read_text(encoding="utf-8"))
-files = ["plugin.json", "package.json", "main.py", "py_modules/brightness_floor_backend.py", "dist/index.js", "dist/index.js.map", "LICENSE", "README.md", "THIRD_PARTY_NOTICES.md"]
+files = ["plugin.json", "package.json", "main.py", "py_modules/brightness_floor_backend.py", "dist/index.js", "dist/index.js.map", "LICENSE", "README.md", "README.en.md", "THIRD_PARTY_NOTICES.md"]
 files.extend(str(path.relative_to(root)).replace("\\", "/")
              for path in sorted((root / "licenses").glob("*.txt")))
 for name in files:
