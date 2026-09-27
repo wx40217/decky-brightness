@@ -2,19 +2,21 @@
 
 Brightness Floor — a Decky plugin for Steam Deck OLED that remembers a user-calibrated minimum brightness and clamps its own brightness controls.
 
-为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。首版 0.1.2 使用手动调节；系统自适应下限尚未开放。真机 SDR、HDR 和刷新率兼容性待验证。
+为 Steam Deck OLED 保存最低可接受亮度，并在 Decky 面板内调光。首版 0.1.3 使用手动调节；系统自适应下限尚未开放。真机 SDR、HDR 和刷新率兼容性待验证。
 
 [下载预发布安装包](https://github.com/wx40217/decky-brightness/releases) · [反馈问题](https://github.com/wx40217/decky-brightness/issues)
 
 ## 安装与使用
 
-1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.2.zip` 复制到 Deck，无需解压。
+1. Steam Deck 已安装 Decky Loader。将 `decky-brightness-floor-0.1.3.zip` 复制到 Deck，无需解压。
 2. 在游戏模式打开 Decky 设置，启用开发者模式，使用“从 ZIP 安装插件 / Install Plugin from ZIP”选择安装包。
-3. 关闭 Steam 系统自适应亮度，打开“亮度下限”，确认“我已关闭系统自适应”。
-4. 未保存下限时，“校准亮度”滑块可在 0–100% 范围内调节。用滑块粗定位，再用 ±0.01、±0.1 个百分点的按钮微调到你确认可接受的位置，点击“将当前亮度保存为下限”。若还未取得当前值，先在系统中略微调亮，再回到所需位置。
-5. 保存后，滑块和微调按钮都限制在已保存下限至 100% 范围内。“回到最低亮度”可直接回到保存的位置。
+3. 关闭 Steam 系统自适应亮度并打开“亮度下限”。插件直接读取系统开关，显示“系统自适应：关闭”后即可调光，无须额外勾选确认。
+4. 没有自定义配置时，默认下限为 44%，来自作者在自己的 Steam Deck OLED 上的校准。滑块和 ±0.01、±0.1 个百分点微调按钮均在当前下限至 100% 范围内调节。“回到最低亮度”可回到该下限。
+5. 可点击“将当前亮度保存为下限”保存自定义值；需要重新校准到现有下限以下时，先用系统调节到你确认可接受的位置，再保存。若还未取得当前值，先在系统中略微调亮，再回到所需位置。
 
-下限以原始数值保存在 Decky 的插件设置目录中；关闭面板、重启和正常更新不会清除它。每次插件重新加载后需重新确认系统自适应已关闭。插件不会在启动时自动改变亮度；需要时点击“回到最低亮度”。
+自定义下限以原始数值保存在 Decky 的插件设置目录中；关闭面板、重启和正常更新不会清除它，更新也不会将已有自定义值改成 44%。旧版未设置下限的配置自动使用默认 44%，无需重写文件。插件不会在启动时自动改变亮度；需要时点击“回到最低亮度”。
+
+系统自适应状态通过 Steam 系统设置接口监听，并在每次调光前重新读取。开启自适应或读取失败时，插件暂停调光并取消待发送请求；关闭后自动恢复。卸载会清理亮度及系统设置监听，不会切换系统自适应开关。
 
 系统滑块、亮度快捷键和系统自适应仍可能使亮度低于下限。插件不使用事后调回机制，不宣称全局保护。外接显示器连接、桌面模式、非 OLED 设备或无法确认内置屏幕时，插件暂停调光。卸载清除监听，保持卸载当时亮度。
 
@@ -40,7 +42,7 @@ npm run package
 
 ZIP 包含一个 `decky-brightness-floor/` 顶层目录及编译后的 `dist/index.js`。无须在 Deck 上安装 Node.js 或编译插件。
 
-亮度接口参考 [Decky Display 类型定义](https://github.com/SteamDeckHomebrew/decky-frontend-lib/blob/main/src/globals/steam-client/system/Display.ts)。控制器随插件加载，独立于面板挂载；对快速连续请求合并待发送值，未设置下限时允许完整范围校准，设置后所有发送值均经过下限限制。没有对 Steam 全局接口做拦截。
+亮度接口参考 [Decky Display 类型定义](https://github.com/SteamDeckHomebrew/decky-frontend-lib/blob/main/src/globals/steam-client/system/Display.ts)。系统自适应状态读取 `CMsgSystemManagerSettings` 的 `display_adaptive_brightness_enabled` 字段（7）；未携带该字段的增量通知不会被误判为关闭。控制器随插件加载，独立于面板挂载，对快速连续请求合并待发送值，所有发送值均经过当前下限限制。没有对 Steam 全局接口做拦截。
 
 后续验证重点：系统版本与接口回报、调亮后返回精确下限、关闭面板与重新打开、睡眠唤醒与重启、进出 SDR/HDR 游戏及 45/60/90 Hz、外接屏幕暂停。系统自适应需额外证明在实际生效前受限且不会争抢，才能开放。
 

@@ -18,11 +18,13 @@ class SettingsTests(unittest.TestCase):
 
     def test_first_launch_and_exact_roundtrip(self):
         settings = Settings(self.directory)
-        self.assertIsNone(settings.minimum)
+        self.assertEqual(settings.minimum, 0.44)
+        self.assertTrue(settings.snapshot()["minimum_is_default"])
         self.assertFalse(settings.path.exists())
         value = 0.2345678912345678
         asyncio.run(settings.save(value))
         self.assertEqual(Settings(self.directory).minimum, value)
+        self.assertFalse(Settings(self.directory).snapshot()["minimum_is_default"])
         self.assertEqual(json.loads(settings.path.read_text())["minimum_brightness"], value)
 
     def test_invalid_values_never_replace_file(self):
@@ -51,7 +53,8 @@ class SettingsTests(unittest.TestCase):
             path = self.directory / "brightness-floor.json"
             path.write_text(content)
             settings = Settings(self.directory)
-            self.assertIsNone(settings.minimum)
+            self.assertEqual(settings.minimum, 0.44)
+            self.assertTrue(settings.snapshot()["minimum_is_default"])
             self.assertIsNotNone(settings.error)
             self.assertEqual(path.read_text(), content)
             asyncio.run(settings.save(0.51))
@@ -60,6 +63,22 @@ class SettingsTests(unittest.TestCase):
     def test_zero_and_one_are_valid(self):
         self.assertEqual(validate_brightness(0), 0)
         self.assertEqual(validate_brightness(1), 1)
+
+    def test_legacy_unconfigured_file_uses_default_without_rewriting_it(self):
+        path = self.directory / "brightness-floor.json"
+        contents = '{"version":1,"minimum_brightness":null}'
+        path.write_text(contents)
+        settings = Settings(self.directory)
+        self.assertEqual(settings.minimum, 0.44)
+        self.assertTrue(settings.snapshot()["minimum_is_default"])
+        self.assertEqual(path.read_text(), contents)
+
+    def test_existing_custom_floor_is_not_replaced_by_default(self):
+        settings = Settings(self.directory)
+        asyncio.run(settings.save(0.4408136010169983))
+        restored = Settings(self.directory)
+        self.assertEqual(restored.minimum, 0.4408136010169983)
+        self.assertFalse(restored.snapshot()["minimum_is_default"])
 
 
 class EnvironmentTests(unittest.TestCase):

@@ -10,13 +10,19 @@ let unregisters = 0;
 let intervals = 0;
 let clears = 0;
 const writes = [];
+let adaptive = false;
+const settingsListeners = new Set();
+function setAdaptive(value) {
+  adaptive = value;
+  for (const callback of [...settingsListeners]) callback(new Uint8Array([56, adaptive ? 1 : 0]));
+}
 const backend = {
-  minimum_brightness: floor, settings_error: null,
+  minimum_brightness: floor, minimum_is_default: false, settings_error: null,
   environment: { allowed: true, reason: "", model: "Galileo", steamos_version: "test", kernel: "test" },
 };
 const jsx = (type, props) => ({ type, props });
 const context = {
-  console, setTimeout, clearTimeout,
+  console, setTimeout, clearTimeout, queueMicrotask,
   setInterval() { intervals++; return intervals; },
   clearInterval() { clears++; },
   window: {
@@ -28,11 +34,17 @@ const context = {
           if (route === "get_state") return structuredClone(backend);
           assert.equal(route, "save_minimum");
           backend.minimum_brightness = value;
-          return { minimum_brightness: value, settings_error: null };
+          backend.minimum_is_default = false;
+          return { minimum_brightness: value, minimum_is_default: false, settings_error: null };
         } };
       },
     },
-    SteamClient: { System: { Display: {
+    SteamClient: { System: {
+      RegisterForSettingsChanges(callback) {
+        settingsListeners.add(callback);
+        callback(new Uint8Array([56, adaptive ? 1 : 0]));
+        return { unregister() { settingsListeners.delete(callback); } };
+      }, Display: {
       RegisterForBrightnessChanges(callback) {
         notify = callback;
         callback({ flBrightness: 0.7 });
@@ -65,8 +77,12 @@ function panel(target = plugin) { return nodes(target.content.type(target.conten
 let content = panel();
 let slider = content.find(node => node.type === "SliderField");
 assert.equal(slider.props.min, floor * 100);
-assert.equal(slider.props.disabled, true);
-content.find(node => node.type === "ToggleField").props.onChange(true);
+assert.equal(slider.props.disabled, false);
+assert(!content.some(node => node.type === "ToggleField"), "manual acknowledgement must be removed");
+setAdaptive(true);
+content = panel();
+assert.equal(content.find(node => node.type === "SliderField").props.disabled, true);
+setAdaptive(false);
 content = panel();
 slider = content.find(node => node.type === "SliderField");
 assert.equal(slider.props.disabled, false);
@@ -82,17 +98,18 @@ plugin.onDismount();
 assert.equal(unregisters, 1);
 assert.equal(intervals, 1);
 assert.equal(clears, 1);
+assert.equal(settingsListeners.size, 0);
 
-backend.minimum_brightness = null;
+backend.minimum_brightness = 0.44;
+backend.minimum_is_default = true;
 const calibration = context.pluginFactory();
 await wait();
 content = panel(calibration);
 slider = content.find(node => node.type === "SliderField");
-assert.equal(slider.props.min, 0);
+assert.equal(slider.props.min, 44);
 assert.equal(slider.props.step, 0.01);
 assert.equal(slider.props.minimumDpadGranularity, 0.01);
-assert.equal(slider.props.disabled, true);
-content.find(node => node.type === "ToggleField").props.onChange(true);
+assert.equal(slider.props.disabled, false);
 content = panel(calibration);
 assert.equal(content.find(node => node.type === "SliderField").props.disabled, false);
 const microButton = content.find(node => node.type === "DialogButton" &&
@@ -101,7 +118,7 @@ assert.equal(microButton.props.disabled, false);
 microButton.props.onClick();
 await wait();
 assert.equal(writes.at(-1), 0.6999);
-assert.equal(content.find(node => node.type === "ButtonItem" && node.props.children === "回到最低亮度").props.disabled, true);
+assert.equal(content.find(node => node.type === "ButtonItem" && node.props.children === "回到最低亮度").props.disabled, false);
 content = panel(calibration);
 content.find(node => node.type === "ButtonItem" && node.props.children === "将当前亮度保存为下限").props.onClick();
 await wait();
@@ -112,4 +129,5 @@ calibration.onDismount();
 assert.equal(unregisters, 2);
 assert.equal(intervals, 2);
 assert.equal(clears, 2);
-console.log("Compiled plugin calibrates without a floor, micro-adjusts, saves exact calibration, enforces the saved floor and unloads cleanly (mock Steam/Decky).");
+assert.equal(settingsListeners.size, 0);
+console.log("Compiled plugin uses the default floor, reads system adaptive state, gates controls automatically, micro-adjusts, preserves custom floors and cleans up listeners (mock Steam/Decky).");

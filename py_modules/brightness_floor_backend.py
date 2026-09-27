@@ -9,6 +9,9 @@ import tempfile
 from pathlib import Path
 
 
+DEFAULT_MINIMUM_BRIGHTNESS = 0.44
+
+
 def validate_brightness(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("亮度必须是数字")
@@ -20,7 +23,8 @@ def validate_brightness(value):
 class Settings:
     def __init__(self, directory):
         self.path = Path(directory) / "brightness-floor.json"
-        self.minimum = None
+        self.minimum = DEFAULT_MINIMUM_BRIGHTNESS
+        self.is_default = True
         self.error = None
         self.lock = asyncio.Lock()
         self.load()
@@ -31,17 +35,21 @@ class Settings:
             if not isinstance(data, dict) or data.get("version") != 1:
                 raise ValueError("不支持的配置格式")
             minimum = data["minimum_brightness"]
-            self.minimum = None if minimum is None else validate_brightness(minimum)
+            self.is_default = minimum is None
+            self.minimum = DEFAULT_MINIMUM_BRIGHTNESS if self.is_default else validate_brightness(minimum)
             self.error = None
         except FileNotFoundError:
-            self.minimum = None
+            self.minimum = DEFAULT_MINIMUM_BRIGHTNESS
+            self.is_default = True
             self.error = None
         except (OSError, ValueError, KeyError, TypeError):
-            self.minimum = None
-            self.error = "无法读取已保存的下限。原文件已保留，请重新校准并保存。"
+            self.minimum = DEFAULT_MINIMUM_BRIGHTNESS
+            self.is_default = True
+            self.error = "无法读取已保存的下限，暂用默认 44%。原文件已保留，请重新校准并保存。"
 
     def snapshot(self):
-        return {"minimum_brightness": self.minimum, "settings_error": self.error}
+        return {"minimum_brightness": self.minimum, "minimum_is_default": self.is_default,
+                "settings_error": self.error}
 
     async def save(self, value):
         value = validate_brightness(value)
@@ -62,6 +70,7 @@ class Settings:
                 if os.path.exists(temporary):
                     os.unlink(temporary)
             self.minimum = value
+            self.is_default = False
             self.error = None
             return self.snapshot()
 

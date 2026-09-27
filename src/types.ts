@@ -1,6 +1,7 @@
 export interface SettingsState {
   minimum_brightness: number | null;
   settings_error: string | null;
+  minimum_is_default: boolean;
 }
 
 export interface EnvironmentState {
@@ -18,6 +19,14 @@ export interface BackendState extends SettingsState {
 export interface DisplayAPI {
   SetBrightness(value: number): unknown;
   RegisterForBrightnessChanges(callback: (data: { flBrightness: number }) => void): {
+    unregister(): void;
+  };
+}
+
+export type SystemSettingsData = ArrayBuffer | ArrayBufferView | string;
+
+export interface SystemSettingsAPI {
+  RegisterForSettingsChanges(callback: (data: SystemSettingsData) => void): {
     unregister(): void;
   };
 }

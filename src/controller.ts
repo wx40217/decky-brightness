@@ -1,4 +1,5 @@
-import type { BackendAPI, BackendState, DisplayAPI } from "./types";
+import type { BackendAPI, BackendState, DisplayAPI, SystemSettingsAPI, SystemSettingsData } from "./types";
+import { adaptiveBrightnessUpdate } from "./system-settings";
 
 // Smaller than a 0.01 percentage point adjustment; allows native float rounding.
 const confirmationTolerance = 0.00002;
@@ -14,11 +15,23 @@ export function clampBrightness(value: unknown, minimum: number): number {
   return Math.max(brightness(value), brightness(minimum));
 }
 
+function nativeFloorRequest(target: number, minimum: number): number {
+  // Steam serializes brightness as float32. E.g. 0.44 rounds just below 0.44;
+  // use the next float only when rounding would cross the saved floor.
+  const rounded = Math.fround(target);
+  if (rounded >= minimum) return target;
+  const value = new Float32Array([rounded]);
+  const bits = new Uint32Array(value.buffer);
+  bits[0]++;
+  return value[0];
+}
+
 export interface State {
   current: number | null;
   minimum: number | null;
   requested: number | null;
-  manualConfirmed: boolean;
+  adaptiveEnabled: boolean | null;
+  adaptiveError: string | null;
   connected: boolean;
   busy: boolean;
   backend: BackendState | null;
@@ -28,11 +41,13 @@ export interface State {
 
 export class BrightnessController {
   private state: State = {
-    current: null, minimum: null, requested: null, manualConfirmed: false,
+    current: null, minimum: null, requested: null, adaptiveEnabled: null, adaptiveError: null,
     connected: false, busy: false, backend: null, error: null, message: null,
   };
   private subscribers = new Set<() => void>();
   private registration: { unregister(): void } | null = null;
+  private settingsRegistration: { unregister(): void } | null = null;
+  private settingsRevision = 0;
   private poll: ReturnType<typeof setInterval> | null = null;
   private confirmation: { target: number; minimum: number; resolve: () => void; reject: (e: Error) => void } | null = null;
   private confirmationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -43,6 +58,7 @@ export class BrightnessController {
   private deadlines = new Set<() => void>();
 
   constructor(private display: DisplayAPI | undefined, private api: BackendAPI,
+              private system: SystemSettingsAPI | undefined,
               private timeout = 2500, private pollInterval = 5000, private rpcTimeout = 8000) {}
 
   getSnapshot = (): State => this.state;
@@ -93,6 +109,7 @@ export class BrightnessController {
       this.update({ error: "无法监听系统亮度，亮度控制已停用。" });
       return;
     }
+    this.watchSettings();
     await this.refresh();
     if (!this.disposed) this.poll = setInterval(() => { void this.refresh(); }, this.pollInterval);
   }
@@ -118,7 +135,10 @@ export class BrightnessController {
   refresh(): Promise<boolean> {
     if (this.disposed) return Promise.resolve(false);
     if (this.refreshing) return this.refreshing;
-    this.refreshing = this.readBackend().finally(() => { this.refreshing = null; });
+    if (!this.settingsRegistration) this.watchSettings();
+    this.refreshing = Promise.all([this.readBackend(), this.readAdaptive()])
+      .then(([allowed, adaptiveOff]) => !this.disposed && allowed && adaptiveOff && this.state.adaptiveEnabled === false)
+      .finally(() => { this.refreshing = null; });
     return this.refreshing;
   }
 
@@ -131,7 +151,7 @@ export class BrightnessController {
       this.update({ backend, minimum, ...(this.state.backend === null ? { error: null } : {}) });
       if (!backend.environment.allowed) {
         this.queued = null;
-        this.update({ current: null, manualConfirmed: false });
+        this.update({ current: null });
         this.confirmation?.reject(new Error(backend.environment.reason));
       } else if (wasAllowed === false) {
         // A value observed while docked/asleep is not a fresh internal-panel reading.
@@ -145,12 +165,78 @@ export class BrightnessController {
     }
   }
 
-  confirmManual(value: boolean): void {
-    this.update({ manualConfirmed: value, error: null, message: null });
-    if (!value) {
+  private adaptiveState(value: boolean | null, error: string | null = null): void {
+    this.settingsRevision++;
+    this.update({ adaptiveEnabled: value, adaptiveError: error });
+    if (value !== false) {
       this.queued = null;
-      this.confirmation?.reject(new Error("插件调光已停用。"));
+      this.update({ message: null });
+      this.confirmation?.reject(new Error(this.adaptiveReason()));
+    } else if (this.state.error === "系统自适应已开启，插件调光已暂停。" ||
+               this.state.error === "无法确认系统自适应状态，插件调光已暂停。") {
+      this.update({ error: null });
     }
+  }
+
+  private adaptiveReason(): string {
+    return this.state.adaptiveEnabled === true ? "系统自适应已开启，插件调光已暂停。" :
+      "无法确认系统自适应状态，插件调光已暂停。";
+  }
+
+  private watchSettings(): void {
+    if (this.disposed || this.settingsRegistration) return;
+    try {
+      if (typeof this.system?.RegisterForSettingsChanges !== "function") throw new Error();
+      const registration = this.system.RegisterForSettingsChanges(data => {
+        if (this.disposed) return;
+        try {
+          const value = adaptiveBrightnessUpdate(data);
+          if (value !== null) this.adaptiveState(value);
+        } catch { this.adaptiveState(null, "系统设置回报无效，请重新检查状态。"); }
+      });
+      if (!registration || typeof registration.unregister !== "function") throw new Error();
+      this.settingsRegistration = registration;
+    } catch { this.adaptiveState(null, "系统自适应读取接口不可用。"); }
+  }
+
+  private readAdaptive(): Promise<boolean> {
+    if (this.disposed) return Promise.resolve(false);
+    return new Promise(resolve => {
+      let registration: { unregister(): void } | undefined;
+      let settled = false;
+      const finish = (error: string | null, value: boolean | null = null): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.deadlines.delete(cancel);
+        try { registration?.unregister(); } catch { /* Steam may be shutting down. */ }
+        this.adaptiveState(value, error);
+        resolve(!this.disposed && !error && value === false);
+      };
+      const cancel = (): void => finish("插件已卸载。");
+      const timer = setTimeout(() => finish("读取系统自适应状态超时，请重新检查状态。"), Math.min(this.rpcTimeout, 1000));
+      this.deadlines.add(cancel);
+      try {
+        if (!this.settingsRegistration || typeof this.system?.RegisterForSettingsChanges !== "function") throw new Error();
+        registration = this.system.RegisterForSettingsChanges((data: SystemSettingsData) => {
+          try {
+            const value = adaptiveBrightnessUpdate(data);
+            if (value !== null) {
+              const revision = this.settingsRevision;
+              queueMicrotask(() => revision === this.settingsRevision ? finish(null, value) :
+                finish(this.state.adaptiveError, this.state.adaptiveEnabled));
+            }
+          } catch { finish("系统设置回报无效，请重新检查状态。"); }
+        });
+        if (!registration || typeof registration.unregister !== "function") throw new Error();
+        if (settled) registration.unregister();
+      } catch { finish("系统自适应读取接口不可用。"); }
+    });
+  }
+
+  private blockedReason(): string {
+    return this.state.backend?.environment.reason ||
+      (this.state.adaptiveEnabled !== false ? this.adaptiveReason() : this.state.error) || "无法确认设备状态。";
   }
 
   async saveCurrentMinimum(): Promise<void> {
@@ -162,7 +248,7 @@ export class BrightnessController {
     }
     this.update({ busy: true, error: null, message: null });
     try {
-      if (!await this.refresh()) throw new Error(this.state.backend?.environment.reason || "无法确认设备状态。");
+      if (!await this.refresh()) throw new Error(this.blockedReason());
       if (this.disposed) return;
       // Use the latest reported value, never a rounded percentage or slider position.
       const latest = this.state.current;
@@ -182,7 +268,7 @@ export class BrightnessController {
     try {
       if (this.state.busy && !this.running) throw new Error("正在保存下限，请稍候。");
       if (!this.state.connected || !this.state.backend?.environment.allowed) throw new Error("当前无法控制内置屏幕亮度。");
-      if (!this.state.manualConfirmed) throw new Error("请先关闭系统自适应并确认。" );
+      if (this.state.adaptiveEnabled !== false) throw new Error(this.adaptiveReason());
       if (this.state.current === null) throw new Error("尚未取得当前亮度，请先重新检查状态。" );
       const target = clampBrightness(value, this.state.minimum ?? 0);
       this.queued = target;
@@ -210,10 +296,10 @@ export class BrightnessController {
     this.update({ busy: true });
     try {
       while (this.queued !== null && !this.disposed) {
-        if (!await this.refresh()) throw new Error(this.state.backend?.environment.reason || "无法确认设备状态。");
-        if (this.disposed || this.queued === null || !this.state.manualConfirmed) break;
+        if (!await this.refresh()) throw new Error(this.blockedReason());
+        if (this.disposed || this.queued === null || this.state.adaptiveEnabled !== false) break;
         const minimum = this.state.minimum ?? 0;
-        const target = clampBrightness(this.queued, minimum);
+        const target = nativeFloorRequest(clampBrightness(this.queued, minimum), minimum);
         this.queued = null;
         if (this.state.current === target) {
           this.update({ message: "系统回报已处于目标亮度。" });
@@ -273,6 +359,8 @@ export class BrightnessController {
     for (const cancel of this.deadlines) cancel();
     try { this.registration?.unregister(); } catch { /* Steam may already be shutting down. */ }
     this.registration = null;
+    try { this.settingsRegistration?.unregister(); } catch { /* Steam may already be shutting down. */ }
+    this.settingsRegistration = null;
     this.subscribers.clear();
   }
 }

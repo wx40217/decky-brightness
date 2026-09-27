@@ -23,7 +23,8 @@ plugin = module.Plugin()
 async def check():
     await plugin._main()
     state = await plugin.get_state()
-    assert state["minimum_brightness"] is None
+    assert state["minimum_brightness"] == 0.44
+    assert state["minimum_is_default"] is True
     assert "allowed" in state["environment"]
     await plugin._unload()
 asyncio.run(check())

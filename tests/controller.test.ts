@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BrightnessController, brightness, clampBrightness } from "../src/controller";
-import type { BackendState, DisplayAPI } from "../src/types";
+import type { BackendState, DisplayAPI, SystemSettingsAPI, SystemSettingsData } from "../src/types";
 
 const initial = (): BackendState => ({
-  minimum_brightness: 0.2345678912345, settings_error: null,
+  minimum_brightness: 0.2345678912345, minimum_is_default: false, settings_error: null,
   environment: { allowed: true, reason: "", model: "Galileo", steamos_version: "test", kernel: "test" },
 });
 
@@ -14,13 +14,24 @@ async function idle(controller: BrightnessController): Promise<void> {
   assert.equal(controller.getSnapshot().busy, false, "controller did not become idle");
 }
 
-async function harness(options: { initialEvent?: number | null; floor?: number | null; timeout?: number } = {}) {
+async function harness(options: { initialEvent?: number | null; floor?: number | null; timeout?: number;
+  adaptive?: boolean | null; settingsAvailable?: boolean } = {}) {
   const backend = initial();
   if (options.floor !== undefined) backend.minimum_brightness = options.floor;
   let notify: (data: { flBrightness: number }) => void = () => {};
   let removed = 0;
   let rejectSave = false;
   let rejectRead = false;
+  let adaptive = options.adaptive === undefined ? false : options.adaptive;
+  const listeners = new Set<(data: SystemSettingsData) => void>();
+  const settingsData = () => adaptive === null ? new Uint8Array() : new Uint8Array([56, adaptive ? 1 : 0]);
+  const system: SystemSettingsAPI = {
+    RegisterForSettingsChanges(callback) {
+      listeners.add(callback);
+      callback(settingsData());
+      return { unregister() { listeners.delete(callback); } };
+    },
+  };
   const writes: number[] = [];
   let writer: (value: number) => unknown = value => { queueMicrotask(() => notify({ flBrightness: value })); };
   const initialEvent = options.initialEvent === undefined ? 0.5 : options.initialEvent;
@@ -37,12 +48,19 @@ async function harness(options: { initialEvent?: number | null; floor?: number |
     async saveMinimum(value) {
       if (rejectSave) throw new Error("disk full");
       backend.minimum_brightness = value;
-      return { minimum_brightness: value, settings_error: null };
+      backend.minimum_is_default = false;
+      return { minimum_brightness: value, minimum_is_default: false, settings_error: null };
     },
-  }, options.timeout ?? 20, 60_000);
+  }, options.settingsAvailable === false ? undefined : system, options.timeout ?? 20, 60_000, 30);
   await controller.start();
   return { controller, backend, writes, notify: (value: number) => notify({ flBrightness: value }),
     removed: () => removed,
+    settingsListeners: () => listeners.size,
+    setAdaptive: (value: boolean | null, emit = true) => {
+      adaptive = value;
+      if (emit) for (const callback of [...listeners]) callback(settingsData());
+    },
+    notifySettings: (data: SystemSettingsData) => { for (const callback of [...listeners]) callback(data); },
     writeWith: (value: (value: number) => unknown) => { writer = value; },
     failSave: () => { rejectSave = true; }, failRead: () => { rejectRead = true; } };
 }
@@ -65,7 +83,6 @@ test("missing current brightness blocks calibration writes instead of inventing 
   assert.equal(h.controller.getSnapshot().current, null);
   await h.controller.saveCurrentMinimum();
   assert.match(h.controller.getSnapshot().error!, /尚未取得/);
-  h.controller.confirmManual(true);
   h.controller.setBrightness(0.5);
   h.controller.adjustBrightness(0.0001);
   assert.deepEqual(h.writes, []);
@@ -73,9 +90,6 @@ test("missing current brightness blocks calibration writes instead of inventing 
 
 test("unconfigured calibration supports fine changes and the full normalized range", async t => {
   const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
-  h.controller.setBrightness(0.4);
-  assert.deepEqual(h.writes, [], "manual confirmation is still required");
-  h.controller.confirmManual(true);
   h.controller.adjustBrightness(-0.0001);
   await idle(h.controller);
   assert.deepEqual(h.writes, [0.4999]);
@@ -90,7 +104,6 @@ test("unconfigured calibration supports fine changes and the full normalized ran
 
 test("saving calibration changes every subsequent adjustment to respect the exact floor", async t => {
   const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
-  h.controller.confirmManual(true);
   h.controller.adjustBrightness(0.0001);
   await idle(h.controller);
   await h.controller.saveCurrentMinimum();
@@ -107,7 +120,6 @@ test("saving calibration changes every subsequent adjustment to respect the exac
 
 test("rapid micro adjustments accumulate from the requested value without dropping clicks", async t => {
   const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
-  h.controller.confirmManual(true);
   h.writeWith(() => undefined);
   h.controller.adjustBrightness(0.0001);
   await tick();
@@ -124,7 +136,6 @@ test("rapid micro adjustments accumulate from the requested value without droppi
 
 test("an unchanged brightness report cannot confirm a fine adjustment", async t => {
   const h = await harness({ floor: null }); t.after(() => h.controller.dispose());
-  h.controller.confirmManual(true);
   h.writeWith(() => h.notify(0.5));
   h.controller.adjustBrightness(0.0001);
   await idle(h.controller);
@@ -141,7 +152,6 @@ test("calibration survives panel subscriptions, uses unrounded latest observatio
   assert.equal(h.backend.minimum_brightness, 0.456789123456);
   h.notify(0.8123456789);
   assert.equal(h.controller.getSnapshot().current, 0.8123456789);
-  h.controller.confirmManual(true);
   h.controller.setBrightness(0);
   await idle(h.controller);
   assert.deepEqual(h.writes, [0.456789123456]);
@@ -155,11 +165,20 @@ test("save failure preserves existing floor", async t => {
   assert.match(h.controller.getSnapshot().error!, /后端操作失败/);
 });
 
-test("manual confirmation is required and invalid targets never reach Steam", async t => {
-  const h = await harness(); t.after(() => h.controller.dispose());
+test("system adaptive brightness blocks writes and disabling it automatically restores control", async t => {
+  const h = await harness({ adaptive: true }); t.after(() => h.controller.dispose());
   h.controller.setBrightness(0.8);
   assert.deepEqual(h.writes, []);
-  h.controller.confirmManual(true);
+  assert.equal(h.controller.getSnapshot().adaptiveEnabled, true);
+  h.setAdaptive(false);
+  h.controller.setBrightness(0.8);
+  await idle(h.controller);
+  assert.deepEqual(h.writes, [0.8]);
+  assert.equal(h.controller.getSnapshot().error, null);
+});
+
+test("invalid brightness targets never reach Steam", async t => {
+  const h = await harness(); t.after(() => h.controller.dispose());
   for (const value of [NaN, Infinity, -1, 2]) h.controller.setBrightness(value);
   assert.deepEqual(h.writes, []);
 });
@@ -168,7 +187,6 @@ test("returning to an already reported target is a no-op, not a spurious timeout
   const h = await harness({ initialEvent: initial().minimum_brightness! });
   t.after(() => h.controller.dispose());
   h.writeWith(() => undefined);
-  h.controller.confirmManual(true);
   h.controller.setBrightness(0);
   await idle(h.controller);
   assert.deepEqual(h.writes, []);
@@ -179,7 +197,6 @@ test("returning to an already reported target is a no-op, not a spurious timeout
 test("rapid changes merge queued targets and every write respects floor", async t => {
   const h = await harness(); t.after(() => h.controller.dispose());
   h.writeWith(() => undefined);
-  h.controller.confirmManual(true);
   h.controller.setBrightness(0.8);
   await tick();
   h.controller.setBrightness(0.7);
@@ -196,7 +213,6 @@ test("rapid changes merge queued targets and every write respects floor", async 
 test("no confirmation or below-floor confirmation is reported as failure", async t => {
   const h = await harness(); t.after(() => h.controller.dispose());
   h.writeWith(() => { h.notify(initial().minimum_brightness! - 0.00001); });
-  h.controller.confirmManual(true);
   h.controller.setBrightness(0);
   await idle(h.controller);
   assert.match(h.controller.getSnapshot().error!, /未收到/);
@@ -207,7 +223,6 @@ test("no confirmation or below-floor confirmation is reported as failure", async
 test("sync notifications and async API rejection cannot produce false success", async t => {
   const h = await harness(); t.after(() => h.controller.dispose());
   h.writeWith(value => { h.notify(value); return Promise.reject(new Error("native failure")); });
-  h.controller.confirmManual(true);
   h.controller.setBrightness(0.6);
   await idle(h.controller);
   assert.match(h.controller.getSnapshot().error!, /设置失败/);
@@ -217,7 +232,6 @@ test("sync notifications and async API rejection cannot produce false success", 
 test("explicit native rejection and invalid observation are failures", async t => {
   const h = await harness(); t.after(() => h.controller.dispose());
   h.writeWith(() => false);
-  h.controller.confirmManual(true);
   h.controller.setBrightness(0.6);
   await idle(h.controller);
   assert.match(h.controller.getSnapshot().error!, /拒绝/);
@@ -230,17 +244,15 @@ test("explicit native rejection and invalid observation are failures", async t =
 
 test("dock transitions and inaccessible backend block writes and invalidate current", async t => {
   const h = await harness({ initialEvent: 0.5 }); t.after(() => h.controller.dispose());
-  h.controller.confirmManual(true);
   h.backend.environment.allowed = false;
   h.backend.environment.reason = "external display";
   h.controller.setBrightness(0.6);
   await idle(h.controller);
   assert.deepEqual(h.writes, []);
   assert.equal(h.controller.getSnapshot().current, null);
-  assert.equal(h.controller.getSnapshot().manualConfirmed, false);
+  assert.equal(h.controller.getSnapshot().adaptiveEnabled, false);
   h.backend.environment.allowed = true;
   await h.controller.refresh();
-  h.controller.confirmManual(true);
   h.failRead();
   h.controller.setBrightness(0.7);
   await idle(h.controller);
@@ -250,7 +262,6 @@ test("dock transitions and inaccessible backend block writes and invalidate curr
 test("disposing pending work unregisters once and stops queued writes and notifications", async () => {
   const h = await harness();
   h.writeWith(() => undefined);
-  h.controller.confirmManual(true);
   h.controller.setBrightness(0.8);
   await tick();
   h.controller.setBrightness(0.5);
@@ -261,13 +272,14 @@ test("disposing pending work unregisters once and stops queued writes and notifi
   await tick();
   assert.deepEqual(h.writes, [0.8]);
   assert.equal(h.removed(), 1);
+  assert.equal(h.settingsListeners(), 0);
   assert.equal(h.controller.getSnapshot(), snapshot);
 });
 
 test("missing display API fails safely", async () => {
   const controller = new BrightnessController(undefined, {
-    async getState() { return initial(); }, async saveMinimum(value) { return { minimum_brightness: value, settings_error: null }; },
-  });
+    async getState() { return initial(); }, async saveMinimum(value) { return { minimum_brightness: value, minimum_is_default: false, settings_error: null }; },
+  }, undefined);
   await controller.start();
   assert.equal(controller.getSnapshot().connected, false);
   assert.match(controller.getSnapshot().error!, /接口不可用/);
@@ -281,8 +293,8 @@ test("backend timeouts remain recoverable and unload cancels pending startup", a
   };
   const controller = new BrightnessController(display, {
     async getState() { if (offline) return new Promise<BackendState>(() => {}); return initial(); },
-    async saveMinimum(value) { return { minimum_brightness: value, settings_error: null }; },
-  }, 20, 60_000, 10);
+    async saveMinimum(value) { return { minimum_brightness: value, minimum_is_default: false, settings_error: null }; },
+  }, { RegisterForSettingsChanges(callback) { callback(new Uint8Array([56, 0])); return { unregister() {} }; } }, 20, 60_000, 10);
   await controller.start();
   assert.match(controller.getSnapshot().error!, /无法读取/);
   offline = false;
@@ -292,4 +304,90 @@ test("backend timeouts remain recoverable and unload cancels pending startup", a
   const pending = controller.refresh();
   controller.dispose();
   assert.equal(await pending, false);
+});
+
+test("fresh system snapshots catch a switch missed by the notification listener", async t => {
+  const h = await harness(); t.after(() => h.controller.dispose());
+  h.setAdaptive(true, false);
+  h.controller.setBrightness(0.8);
+  await idle(h.controller);
+  assert.deepEqual(h.writes, []);
+  assert.equal(h.controller.getSnapshot().adaptiveEnabled, true);
+  assert.match(h.controller.getSnapshot().error!, /系统自适应已开启/);
+});
+
+test("enabling adaptive brightness cancels in-flight confirmation and queued writes", async t => {
+  const h = await harness(); t.after(() => h.controller.dispose());
+  h.writeWith(() => undefined);
+  h.controller.setBrightness(0.8);
+  await tick();
+  h.controller.setBrightness(0.5);
+  h.setAdaptive(true);
+  await idle(h.controller);
+  assert.deepEqual(h.writes, [0.8]);
+  assert.equal(h.controller.getSnapshot().message, null);
+  assert.equal(h.controller.getSnapshot().adaptiveEnabled, true);
+});
+
+test("partial messages preserve the adaptive flag and malformed messages block control", async t => {
+  const h = await harness(); t.after(() => h.controller.dispose());
+  h.notifySettings(new Uint8Array([48, 1]));
+  assert.equal(h.controller.getSnapshot().adaptiveEnabled, false);
+  h.notifySettings(new Uint8Array([56]));
+  assert.equal(h.controller.getSnapshot().adaptiveEnabled, null);
+  h.controller.setBrightness(0.8);
+  assert.deepEqual(h.writes, []);
+  await h.controller.refresh();
+  assert.equal(h.controller.getSnapshot().adaptiveEnabled, false);
+});
+
+test("missing or silent settings APIs never pretend adaptive brightness is disabled", async t => {
+  const missing = await harness({ settingsAvailable: false }); t.after(() => missing.controller.dispose());
+  assert.equal(missing.controller.getSnapshot().adaptiveEnabled, null);
+  missing.controller.setBrightness(0.8);
+  assert.deepEqual(missing.writes, []);
+  const silent = await harness({ adaptive: null }); t.after(() => silent.controller.dispose());
+  assert.equal(silent.controller.getSnapshot().adaptiveEnabled, null);
+  assert.match(silent.controller.getSnapshot().adaptiveError!, /超时/);
+  assert.equal(silent.settingsListeners(), 1, "temporary listeners must be removed after timeout");
+});
+
+test("a newer settings event wins over an earlier snapshot waiting to settle", async t => {
+  let registrations = 0;
+  let permanent: ((data: SystemSettingsData) => void) | undefined;
+  const writes: number[] = [];
+  const controller = new BrightnessController({
+    RegisterForBrightnessChanges(callback) { callback({ flBrightness: 0.5 }); return { unregister() {} }; },
+    SetBrightness(value) { writes.push(value); },
+  }, {
+    async getState() { return initial(); },
+    async saveMinimum(value) { return { minimum_brightness: value, minimum_is_default: false, settings_error: null }; },
+  }, {
+    RegisterForSettingsChanges(callback) {
+      registrations++;
+      if (registrations === 1) permanent = callback;
+      callback(new Uint8Array([56, 0]));
+      if (registrations === 2) permanent!(new Uint8Array([56, 1]));
+      return { unregister() {} };
+    },
+  }, 20, 60_000);
+  t.after(() => controller.dispose());
+  await controller.start();
+  assert.equal(controller.getSnapshot().adaptiveEnabled, true);
+  controller.setBrightness(0.8);
+  assert.deepEqual(writes, []);
+});
+
+test("the 44% default stays above its floor when Steam returns a float32 value", async t => {
+  const h = await harness({ floor: 0.44 }); t.after(() => h.controller.dispose());
+  h.writeWith(value => h.notify(Math.fround(value)));
+  h.controller.setBrightness(0);
+  await idle(h.controller);
+  assert.equal(h.controller.getSnapshot().error, null);
+  assert(h.controller.getSnapshot().current! >= 0.44);
+  assert(Math.fround(h.writes[0]) >= 0.44);
+  assert.equal(h.controller.getSnapshot().minimum, 0.44);
+  h.controller.setBrightness(0);
+  await idle(h.controller);
+  assert.equal(h.writes.length, 1, "returning to the native floor a second time is a no-op");
 });
